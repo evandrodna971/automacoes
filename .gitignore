@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+whatsapp_session/
+whatsapp_profile/
+zapfinder.db
+config.json
+*.log
+.DS_Store
