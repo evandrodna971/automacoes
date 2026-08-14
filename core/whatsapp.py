@@ -45,14 +45,15 @@ class WhatsAppBot:
             self.log(f"Erro ao iniciar driver: {e}")
             return False
 
-    def aguardar_login(self, timeout=60):
+    def aguardar_login(self, timeout=120):
         """Aguardar login no WhatsApp Web"""
         try:
             self.log("Aguardando login...")
             elementos_indicadores = [
+                "//div[@id='pane-side']",
                 "//div[@data-testid='chat-list']",
-                "//div[@role='textbox']", 
-                "//div[@contenteditable='true']"
+                "//span[@data-icon='menu']",
+                "//span[@data-icon='chat']"
             ]
             
             WebDriverWait(self.driver, timeout).until(
@@ -80,7 +81,7 @@ class WhatsAppBot:
                 pass
             
             # 2. Usa a busca
-            search_box = self.driver.find_element(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']")
+            search_box = self.driver.find_element(By.XPATH, "//input[contains(@placeholder, 'Pesquisar') or contains(@placeholder, 'nova') or contains(@placeholder, 'Search')] | //div[@id='side']//input")
             search_box.click()
             search_box.clear()
             search_box.send_keys(nome_grupo)
@@ -111,7 +112,7 @@ class WhatsAppBot:
             # 2. Foca no campo de texto principal
             try:
                 # Tenta clicar no campo de mensagem para garantir foco
-                box = self.driver.find_element(By.CSS_SELECTOR, "div[contenteditable='true'][data-tab='10']")
+                box = self.driver.find_element(By.XPATH, "//footer//div[@contenteditable='true'] | //div[@contenteditable='true'][@data-tab='10']")
                 box.click()
                 time.sleep(0.5)
             except:
@@ -180,8 +181,8 @@ class WhatsAppBot:
         """Envia mensagem de texto"""
         try:
             # Encontra campo de texto
-            # data-tab=10 é o campo principal de chat
-            box = self.driver.find_element(By.CSS_SELECTOR, "div[contenteditable='true'][data-tab='10']")
+            # encontra campo de texto
+            box = self.driver.find_element(By.XPATH, "//footer//div[@contenteditable='true'] | //div[@contenteditable='true'][@data-tab='10']")
             box.click()
             
             # Envia texto com suporte a quebras de linha (Shift+Enter)

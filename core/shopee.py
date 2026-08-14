@@ -52,76 +52,95 @@ def processar_oferta_individual(oferta, indice):
         print(f"   ⚠️ Erro no produto {indice}: {str(e)[:80]}")
         return None
 
-def buscar_ofertas_shopee_reais(appid, secret, limit=5):
-    """Busca ofertas reais da API Shopee"""
+def buscar_ofertas_shopee_reais(appid, secret, limit=5, ignore_list=None, log_func=print):
+    """Busca ofertas reais da API Shopee paginando até atingir o limite de produtos únicos"""
     produtos = []
     
     if not appid or not secret or len(secret) != 32:
-        print("⚠️ Credenciais inválidas")
+        log_func("⚠️ Credenciais inválidas")
         return produtos
+        
+    if ignore_list is None:
+        ignore_list = set()
+    else:
+        ignore_list = set(ignore_list)
+        
+    page = 1
+    max_pages = 10  # Limite de segurança para não entrar em loop infinito
     
     try:
-        print(f"\n🛍️  Buscando ofertas na API Shopee (Limit: {limit})...")
+        log_func(f"🛍️ Buscando ofertas Shopee (Meta: {limit}, ignorando {len(ignore_list)} enviados)...")
         
-        query = """{
-  productOfferV2(limit: 10) {
-    nodes {
+        while len(produtos) < limit and page <= max_pages:
+            log_func(f"📡 Buscando página {page} na API Shopee...")
+            
+            query = f"""{{
+  productOfferV2(limit: 20, page: {page}, sortType: 1) {{
+    nodes {{
       productName
       price
       ratingStar
       offerLink
       imageUrl
-    }
-  }
-}"""
-        
-        payload_dict = {"query": query}
-        payload_json = json.dumps(payload_dict, separators=(',', ':'))
-        
-        timestamp, signature = gerar_assinatura(appid, secret, payload_json)
-        
-        auth_header = f"SHA256 Credential={appid}, Timestamp={timestamp}, Signature={signature}"
-        
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": auth_header,
-            "User-Agent": "Mozilla/5.0"
-        }
-        
-        print(f"Requesting {API_URL}...")
-        response = requests.post(API_URL, headers=headers, data=payload_json, timeout=25)
-        
-        if response.status_code != 200:
-            print(f"⚠️ HTTP {response.status_code} da API")
-            return produtos
-        
-        resposta = response.json()
-        
-        # Verificação passo a passo da estrutura
-        if "data" not in resposta:
-            print("❌ Resposta não contém 'data'")
-            return produtos
+    }}
+  }}
+}}"""
             
-        if "productOfferV2" not in resposta["data"]:
-            print("❌ Resposta não contém 'productOfferV2'")
-            return produtos
+            payload_dict = {"query": query}
+            payload_json = json.dumps(payload_dict, separators=(',', ':'))
             
-        if "nodes" not in resposta["data"]["productOfferV2"]:
-            print("❌ Resposta não contém 'nodes'")
-            return produtos
-        
-        ofertas = resposta["data"]["productOfferV2"]["nodes"]
-        
-        print(f"✅ API retornou {len(ofertas)} ofertas!")
-        
-        for i, oferta in enumerate(ofertas[:limit]):
-            produto_processado = processar_oferta_individual(oferta, i+1)
-            if produto_processado:
-                produtos.append(produto_processado)
-        
-        print(f"✅ {len(produtos)} produtos processados com sucesso")
+            timestamp, signature = gerar_assinatura(appid, secret, payload_json)
+            
+            auth_header = f"SHA256 Credential={appid}, Timestamp={timestamp}, Signature={signature}"
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": auth_header,
+                "User-Agent": "Mozilla/5.0"
+            }
+            
+            response = requests.post(API_URL, headers=headers, data=payload_json, timeout=25)
+            
+            if response.status_code != 200:
+                log_func(f"⚠️ Erro HTTP {response.status_code} na página {page}")
+                break
+            
+            resposta = response.json()
+            
+            # Verificação passo a passo da estrutura
+            if "data" not in resposta or "productOfferV2" not in resposta["data"] or "nodes" not in resposta["data"]["productOfferV2"]:
+                log_func(f"❌ Resposta inválida da API Shopee na página {page}: {list(resposta.keys()) if isinstance(resposta, dict) else 'Não é objeto'}")
+                break
+            
+            ofertas = resposta["data"]["productOfferV2"]["nodes"]
+            if not ofertas:
+                log_func(f"ℹ️ Sem mais ofertas retornadas na página {page}")
+                break
+            
+            log_func(f"✅ Página {page} retornou {len(ofertas)} ofertas.")
+            
+            novos_adicionados = 0
+            for i, oferta in enumerate(ofertas):
+                produto_processado = processar_oferta_individual(oferta, len(produtos) + 1)
+                if produto_processado:
+                    titulo = produto_processado["titulo"]
+                    if titulo in ignore_list:
+                        continue
+                    
+                    produtos.append(produto_processado)
+                    ignore_list.add(titulo) # Evita duplicados dentro da mesma busca
+                    novos_adicionados += 1
+                    
+                    if len(produtos) >= limit:
+                        break
+            
+            log_func(f"📊 Adicionados {novos_adicionados} novos produtos nesta página. Total acumulado: {len(produtos)}/{limit}")
+            page += 1
+            time.sleep(1) # Intervalo respeitoso entre requisições
+            
+        log_func(f"✅ Processo de busca concluído com {len(produtos)} produtos.")
         
     except Exception as e:
-        print(f"❌ Erro geral na API: {str(e)[:100]}")
+        log_func(f"❌ Erro geral na API: {str(e)[:100]}")
     
-    return produtos
+    return produtos[:limit]

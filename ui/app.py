@@ -1,5 +1,5 @@
 import flet as ft
-from database.db import init_db, salvar_historico, ler_historico
+from database.db import init_db, salvar_historico, ler_historico, obter_produtos_enviados_sucesso
 import threading
 import time
 import os
@@ -98,9 +98,9 @@ def main_app(page: ft.Page):
         page.update()
 
         try:
-            # 1. Buscar Ofertas
             add_log("Buscando ofertas na Shopee...")
-            produtos = buscar_ofertas_shopee_reais(appid, secret, limit=limit)
+            enviados = obter_produtos_enviados_sucesso()
+            produtos = buscar_ofertas_shopee_reais(appid, secret, limit=limit, ignore_list=enviados, log_func=add_log)
             
             if not produtos:
                 add_log("Nenhum produto encontrado ou erro na API.")
@@ -248,17 +248,20 @@ def main_app(page: ft.Page):
         return {}
 
     def save_config(e):
-        cfg = {
-            "appid": input_appid.value,
-            "secret": input_secret.value,
-            "grupo": input_grupo.value,
-            "limit": input_limit.value,
-            # Scheduler Config
-            "scheduler_times": scheduled_times,
-        }
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(cfg, f)
-        add_log("Configurações salvas com sucesso!")
+        try:
+            cfg = {
+                "appid": input_appid.value,
+                "secret": input_secret.value,
+                "grupo": input_grupo.value,
+                "limit": input_limit.value,
+                # Scheduler Config
+                "scheduler_times": scheduled_times,
+            }
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(cfg, f)
+            add_log("Configurações salvas com sucesso!")
+        except Exception as ex:
+            add_log(f"Erro ao salvar configurações: {ex}")
 
     # Load initial config
     current_config = load_config()
@@ -389,20 +392,29 @@ def main_app(page: ft.Page):
             save_config(None) # Auto-save
 
     def add_time_handler(e):
-        t = input_time.value
-        # Simple validation
-        if len(t) == 5 and t[2] == ":":
-             if t not in scheduled_times:
-                 scheduled_times.append(t)
-                 scheduled_times.sort()
-                 input_time.value = ""
-                 update_times_list()
-                 save_config(None) # Auto-save
-             else:
-                 input_time.error_text = "Horário já existe"
-        else:
-             input_time.error_text = "Formato inválido (HH:MM)"
-        page.update()
+        try:
+            t = input_time.value
+            if not t:
+                input_time.error_text = "Digite um horário"
+                page.update()
+                return
+                
+            # Simple validation
+            if len(t) == 5 and t[2] == ":":
+                 if t not in scheduled_times:
+                     scheduled_times.append(t)
+                     scheduled_times.sort()
+                     input_time.value = ""
+                     update_times_list()
+                     save_config(None) # Auto-save
+                 else:
+                     input_time.error_text = "Horário já existe"
+            else:
+                 input_time.error_text = "Formato inválido (HH:MM)"
+            page.update()
+        except Exception as ex:
+            add_log(f"Erro ao adicionar horário: {ex}")
+            page.update()
 
     input_time = ft.TextField(label="Horário (HH:MM)", width=150)
     btn_add_time = ft.Container(

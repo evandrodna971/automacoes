@@ -57,6 +57,19 @@ def ler_historico(limit=50):
         print(f"Erro ao ler historico: {e}")
         return []
 
+def obter_produtos_enviados_sucesso(limit=1000):
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT produto_titulo FROM envio_historico WHERE status = 'Sucesso' ORDER BY id DESC LIMIT ?", (limit,))
+        dados = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        return set(dados)
+    except Exception as e:
+        print(f"Erro ao obter produtos enviados: {e}")
+        return set()
+
 if __name__ == "__main__":
     init_db()
     print("Database initialized.")
+

@@ -3,7 +3,7 @@ requests
 pyautogui
 cryptography
 pillow
-flet>=0.21.0
+flet[desktop]>=0.21.0
 winshell>=0.6
 pywin32>=306
 pyinstaller

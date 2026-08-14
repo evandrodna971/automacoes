@@ -27,30 +27,34 @@ pip install pyinstaller
 
 REM Limpa builds anteriores
 if exist "build" rmdir /s /q build
-if exist "dist" rmdir /s /q dist
+if exist "dist_nova" rmdir /s /q dist_nova
 if exist "*.spec" del /q *.spec
 
 REM Compila
 echo.
-echo [INFO] Compilando ZapFinder.exe...
+echo [INFO] Compilando ZapFinder_Atualizado.exe...
 echo Isso pode demorar alguns minutos.
 echo.
 
 pyinstaller --noconfirm ^
             --onefile ^
             --windowed ^
-            --name "ZapFinder" ^
+            --name "ZapFinder_Atualizado" ^
+            --distpath "dist_nova" ^
+            --collect-all "flet" ^
+            --collect-all "flet_desktop" ^
             --hidden-import "flet" ^
+            --hidden-import "flet_desktop" ^
             --hidden-import "selenium" ^
             --icon "NONE" ^
             main.py
 
 echo.
-if exist "dist\ZapFinder.exe" (
+if exist "dist_nova\ZapFinder_Atualizado.exe" (
     echo ======================================================
     echo            BUILD CONCLUIDO COM SUCESSO!
     echo ======================================================
-    echo O executavel esta na pasta: dist\ZapFinder.exe
+    echo O executavel esta na pasta: dist_nova\ZapFinder_Atualizado.exe
     echo.
 ) else (
     echo [ERRO] Falha na compilacao. Verifique as mensagens acima.
