@@ -6,3 +6,8 @@ zapfinder.db
 config.json
 *.log
 .DS_Store
+
+# Build e Distribuicao (PyInstaller)
+build/
+dist/
+dist_nova/
