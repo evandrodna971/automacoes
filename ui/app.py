@@ -3,7 +3,9 @@ from database.db import init_db, salvar_historico, ler_historico, obter_produtos
 import threading
 import time
 import os
+import random
 from core.shopee import buscar_ofertas_shopee_reais
+from core.mercadolivre import buscar_ofertas_ml_reais
 from core.whatsapp import WhatsAppBot
 from core.utils import baixar_imagem, copy_image_to_clipboard
 
@@ -35,7 +37,7 @@ def main_app(page: ft.Page):
         page.update()
         
     # Refs for buttons to update state
-    btn_iniciar = ft.ElevatedButton("Iniciar Envio Shopee")
+    btn_iniciar = ft.ElevatedButton("Iniciar Envio (Shopee + Mercado Livre)")
     btn_stop = ft.ElevatedButton("Parar", icon="stop", color="red", disabled=True)
     btn_iniciar_ref = ft.Ref[ft.ElevatedButton]()
     btn_stop_ref = ft.Ref[ft.ElevatedButton]()
@@ -47,8 +49,10 @@ def main_app(page: ft.Page):
     # Inputs
     input_appid = ft.TextField(label="Shopee App ID", password=True, can_reveal_password=True)
     input_secret = ft.TextField(label="Shopee Secret Key", password=True, can_reveal_password=True)
+    input_tag_ml = ft.TextField(label="Tag / ID Afiliado Mercado Livre (opcional)")
+    input_termo_ml = ft.TextField(label="Termo de Busca Mercado Livre", value="ofertas")
     input_grupo = ft.TextField(label="Nome do Grupo WhatsApp", value="Teste")
-    input_limit = ft.TextField(label="Quantidade de Produtos", value="5", keyboard_type=ft.KeyboardType.NUMBER)
+    input_limit = ft.TextField(label="Quantidade de Produtos (por plataforma)", value="5", keyboard_type=ft.KeyboardType.NUMBER)
 
     # History Data Table
     history_table = ft.DataTable(
@@ -80,14 +84,12 @@ def main_app(page: ft.Page):
         appid = input_appid.value
         secret = input_secret.value
         grupo = input_grupo.value
+        tag_ml = input_tag_ml.value
+        termo_ml = input_termo_ml.value
         try:
             limit = int(input_limit.value)
         except:
             limit = 5
-        
-        if not appid or not secret:
-            add_log("Erro: Credenciais Shopee não preenchidas!")
-            return
 
         page.process_running = True
         btn_stop.disabled = False
@@ -98,20 +100,38 @@ def main_app(page: ft.Page):
         page.update()
 
         try:
-            add_log("Buscando ofertas na Shopee...")
             enviados = obter_produtos_enviados_sucesso()
-            produtos = buscar_ofertas_shopee_reais(appid, secret, limit=limit, ignore_list=enviados, log_func=add_log)
-            
+            produtos_shopee = []
+            produtos_ml = []
+
+            # 1. Busca ofertas da Shopee (se credenciais preenchidas)
+            if appid and secret:
+                add_log("Buscando ofertas na Shopee...")
+                produtos_shopee = buscar_ofertas_shopee_reais(appid, secret, limit=limit, ignore_list=enviados, log_func=add_log)
+            else:
+                add_log("Credenciais Shopee não fornecidas. Pulando busca Shopee...")
+
+            # 2. Busca ofertas do Mercado Livre
+            add_log(f"Buscando ofertas no Mercado Livre (Termo: '{termo_ml}')...")
+            produtos_ml = buscar_ofertas_ml_reais(termo=termo_ml, tag_afiliado=tag_ml, limit=limit, ignore_list=enviados, log_func=add_log)
+
+            # 3. Combina e embaralha produtos aleatoriamente
+            produtos = produtos_shopee + produtos_ml
+            random.shuffle(produtos)
+
             if not produtos:
-                add_log("Nenhum produto encontrado ou erro na API.")
+                add_log("Nenhum produto encontrado nas plataformas.")
                 txt_status.value = "Parado"
                 txt_status.color = "red"
+                page.process_running = False
+                btn_stop.disabled = True
+                btn_iniciar.disabled = False
                 page.update()
                 return
 
-            add_log(f"Encontrados {len(produtos)} produtos. Iniciando WhatsApp...")
+            add_log(f"Total: {len(produtos)} ofertas obtidas ({len(produtos_shopee)} Shopee + {len(produtos_ml)} Mercado Livre). Iniciando WhatsApp...")
 
-            # 2. Iniciar WhatsApp
+            # 4. Iniciar WhatsApp
             bot = WhatsAppBot()
             if not bot.iniciar_driver():
                 add_log("Erro ao iniciar driver do WhatsApp.")
@@ -127,7 +147,7 @@ def main_app(page: ft.Page):
                 bot.fechar()
                 return
 
-            # 3. Enviar Produtos
+            # 5. Enviar Produtos
             enviados_count = 0
             for i, p in enumerate(produtos):
                 # Check for stop signal
@@ -135,15 +155,16 @@ def main_app(page: ft.Page):
                     add_log("Processo interrompido pelo usuário.")
                     break
 
-                add_log(f"Enviando {i+1}/{len(produtos)}: {p['titulo'][:20]}...")
+                fonte = p.get('fonte', 'Shopee')
+                add_log(f"Enviando {i+1}/{len(produtos)} [{fonte}]: {p['titulo'][:25]}...")
                 
                 # Baixar imagem
                 img_path = os.path.abspath(f"temp_prod_{i}.jpg")
                 if p.get('imagem_url'):
                     baixar_imagem(p['imagem_url'], img_path)
                 
-                # Formatar mensagem (Simples por enquanto)
-                msg = f"*{p['titulo']}*\n\n🔥 Por: R$ {p['preco']}\n\n🛒 Compre aqui: {p['link']}"
+                # Formatar mensagem
+                msg = f"*{p['titulo']}*\n\n🛍️ Origem: {fonte}\n🔥 Por: R$ {p['preco']}\n\n🛒 Compre aqui: {p['link']}"
                 
                 # Enviar
                 sucesso = False
@@ -163,7 +184,7 @@ def main_app(page: ft.Page):
                     add_log(f"Erro envio: {e}")
                 
                 # Salvar no DB
-                salvar_historico(p['titulo'], "WhatsApp", status_envio)
+                salvar_historico(p['titulo'], f"WhatsApp ({fonte})", status_envio)
 
                 # Clean up image
                 if os.path.exists(img_path):
@@ -229,7 +250,7 @@ def main_app(page: ft.Page):
         ft.Divider(),
         ft.Text("Ações Rápidas", size=20),
         ft.Row([
-            ft.ElevatedButton("Iniciar Envio Shopee", icon="play_arrow", on_click=on_click_iniciar, ref=btn_iniciar_ref),
+            ft.ElevatedButton("Iniciar Envio (Shopee + Mercado Livre)", icon="play_arrow", on_click=on_click_iniciar, ref=btn_iniciar_ref),
             ft.ElevatedButton("Parar", icon="stop", color="red", on_click=on_click_parar, disabled=True, ref=btn_stop_ref),
         ])
     ])
@@ -252,6 +273,8 @@ def main_app(page: ft.Page):
             cfg = {
                 "appid": input_appid.value,
                 "secret": input_secret.value,
+                "tag_ml": input_tag_ml.value,
+                "termo_ml": input_termo_ml.value,
                 "grupo": input_grupo.value,
                 "limit": input_limit.value,
                 # Scheduler Config
@@ -269,14 +292,23 @@ def main_app(page: ft.Page):
     # Inputs
     input_appid.value = current_config.get("appid", "")
     input_secret.value = current_config.get("secret", "")
+    input_tag_ml.value = current_config.get("tag_ml", "")
+    input_termo_ml.value = current_config.get("termo_ml", "ofertas")
     input_grupo.value = current_config.get("grupo", "Teste")
     input_limit.value = current_config.get("limit", "5")
     
     # Config Tab
     config_content = ft.Column([
         ft.Text("Configurações", size=30, weight=ft.FontWeight.BOLD),
+        ft.Text("Shopee (API)", size=18, weight=ft.FontWeight.BOLD, color="orange"),
         input_appid,
         input_secret,
+        ft.Divider(),
+        ft.Text("Mercado Livre", size=18, weight=ft.FontWeight.BOLD, color="yellow"),
+        input_termo_ml,
+        input_tag_ml,
+        ft.Divider(),
+        ft.Text("WhatsApp & Automação", size=18, weight=ft.FontWeight.BOLD, color="green"),
         input_grupo,
         input_limit,
         ft.ElevatedButton("Salvar Configurações", icon="save", on_click=save_config)
