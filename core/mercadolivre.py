@@ -103,14 +103,46 @@ def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", matt_word="", limi
             if titulo_limpo in ignore_list or titulo_raw in ignore_list:
                 continue
 
-            # Extrai Preço
-            price_el = item.select_one(".andes-money-amount__fraction, .promotion-item__price")
-            preco_str = price_el.get_text(strip=True) if price_el else "0"
-            preco_str = re.sub(r'[^\d]', '', preco_str)
-            try:
-                preco_num = float(preco_str)
-            except:
-                preco_num = 0.0
+            # 1. Extrai Preço Anterior (De:) se houver
+            prev_box = item.select_one('.poly-price__labels s, s.andes-money-amount--previous, .promotion-item__old-price')
+            preco_original_str = ""
+            if prev_box:
+                frac = prev_box.select_one('.andes-money-amount__fraction')
+                cents = prev_box.select_one('.andes-money-amount__cents')
+                if frac:
+                    f_txt = re.sub(r'[^\d]', '', frac.get_text(strip=True))
+                    c_txt = re.sub(r'[^\d]', '', cents.get_text(strip=True)) if cents else "00"
+                    try:
+                        preco_orig_num = float(f"{f_txt}.{c_txt}")
+                        preco_original_str = f"{preco_orig_num:.2f}"
+                    except:
+                        preco_original_str = ""
+
+            # 2. Extrai Preço Atual Promocional (Por:)
+            curr_box = item.select_one('.poly-price__current, .promotion-item__price')
+            preco_atual_num = 0.0
+            if curr_box:
+                frac = curr_box.select_one('.andes-money-amount__fraction')
+                cents = curr_box.select_one('.andes-money-amount__cents')
+                if frac:
+                    f_txt = re.sub(r'[^\d]', '', frac.get_text(strip=True))
+                    c_txt = re.sub(r'[^\d]', '', cents.get_text(strip=True)) if cents else "00"
+                    try:
+                        preco_atual_num = float(f"{f_txt}.{c_txt}")
+                    except:
+                        preco_atual_num = 0.0
+            else:
+                # Fallback se a estrutura for diferente
+                price_el = item.select_one(".andes-money-amount__fraction")
+                if price_el:
+                    try:
+                        preco_atual_num = float(re.sub(r'[^\d]', '', price_el.get_text(strip=True)))
+                    except:
+                        preco_atual_num = 0.0
+
+            # 3. Extrai Desconto Percentual (% OFF)
+            disc_el = item.select_one('.poly-price__discount-polylabel, .polylabel-pill, .andes-money-amount__discount, .promotion-item__discount')
+            desconto_txt = disc_el.get_text(strip=True) if disc_el else ""
 
             # Extrai e Encurta o Link
             link_el = item.select_one("a.promotion-item__link-container, a.poly-component__title, a")
@@ -150,7 +182,9 @@ def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", matt_word="", limi
 
             produtos.append({
                 "titulo": titulo_limpo,
-                "preco": f"{preco_num:.2f}",
+                "preco": f"{preco_atual_num:.2f}",
+                "preco_original": preco_original_str,
+                "desconto_pct": desconto_txt,
                 "avaliacao": "4.8",
                 "link": link_afiliado,
                 "afiliado": link_afiliado,
@@ -163,6 +197,7 @@ def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", matt_word="", limi
 
     except Exception as e:
         safe_log(f"[Mercado Livre] Erro ao buscar ofertas: {e}")
+
 
     return produtos
 

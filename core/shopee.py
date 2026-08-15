@@ -22,15 +22,30 @@ def processar_oferta_individual(oferta, indice):
         # Extrai dados COM VALORES PADRÃO
         nome = oferta.get("productName", f"Produto {indice}")
         preco_str = oferta.get("price", "0")
+        preco_orig_str = oferta.get("priceMax", "")
+        disc_rate = oferta.get("priceDiscountRate", 0)
         rating_str = oferta.get("ratingStar", "4.5")
         link = oferta.get("offerLink", "")
         imagem_url = oferta.get("imageUrl", "")
         
-        # Converte preço
+        # Converte preço atual
         try:
             preco = float(preco_str)
         except:
             preco = 99.99
+            
+        # Converte preço original (De:)
+        preco_original = ""
+        try:
+            if preco_orig_str:
+                p_orig = float(preco_orig_str)
+                if p_orig > preco:
+                    preco_original = f"{p_orig:.2f}"
+        except:
+            preco_original = ""
+            
+        # Desconto formatado
+        desconto_pct = f"{int(disc_rate)}% OFF" if disc_rate and int(disc_rate) > 0 else ""
         
         # Converte rating
         try:
@@ -44,6 +59,8 @@ def processar_oferta_individual(oferta, indice):
         return {
             "titulo": nome_limpo,
             "preco": f"{preco:.2f}",
+            "preco_original": preco_original,
+            "desconto_pct": desconto_pct,
             "avaliacao": f"{rating:.1f}",
             "link": link if link else "https://shopee.com.br",
             "afiliado": link if link else "https://shopee.com.br",
@@ -82,6 +99,9 @@ def buscar_ofertas_shopee_reais(appid, secret, limit=5, ignore_list=None, log_fu
     nodes {{
       productName
       price
+      priceMin
+      priceMax
+      priceDiscountRate
       ratingStar
       offerLink
       imageUrl

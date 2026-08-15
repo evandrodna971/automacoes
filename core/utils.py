@@ -41,31 +41,49 @@ def copy_image_to_clipboard(image_path):
 
 def formatar_mensagem_produto(produto, cupom=None):
     """
-    Formata o texto padrão de envio para o WhatsApp, incluindo destaque de cupom quando disponível.
+    Formata o texto de envio para o WhatsApp, exibindo:
+    - Preço original riscado (De: ~R$ ...~) quando disponível
+    - Preço promocional (Por: *R$ ...* (XX% OFF))
+    - Destaque claro de cupom digitável ou aplicado
     """
     titulo = produto.get("titulo", "")
     fonte = produto.get("fonte", "Oferta")
-    preco = produto.get("preco", "0.00")
+    preco_atual = produto.get("preco", "0.00")
+    preco_orig = produto.get("preco_original", "")
+    desconto_pct = produto.get("desconto_pct", "")
     link = produto.get("link", "")
 
     linhas = [
         f"*{titulo}*",
         "",
-        f"🛍️ Origem: {fonte}",
-        f"🔥 Por: R$ {preco}"
+        f"🛍️ Origem: {fonte}"
     ]
+
+    # Preço anterior (De:)
+    try:
+        if preco_orig and float(preco_orig) > float(preco_atual):
+            linhas.append(f"❌ De: ~R$ {float(preco_orig):.2f}~")
+    except:
+        pass
+
+    # Preço com Desconto (Por:)
+    por_linha = f"🔥 Por: *R$ {float(preco_atual):.2f}*"
+    if desconto_pct:
+        por_linha += f" ({desconto_pct})"
+    linhas.append(por_linha)
 
     # Se houver cupom associado
     if cupom:
         desc_cupom = cupom.get("discount_text") or cupom.get("title", "")
         code = cupom.get("code", "")
         if code and code not in ["CUPOM_SHOPEE", "CUPOM_NO_ANUNCIO"] and not code.startswith("ML_"):
-            linhas.append(f"🏷️ Cupom: *{code}* ({desc_cupom})")
+            linhas.append(f"🏷️ Cupom: *[ {code} ]* ({desc_cupom})")
         else:
-            linhas.append(f"🏷️ Desconto: *{desc_cupom}*")
+            linhas.append(f"🏷️ Cupom/Desconto: *{desc_cupom}*")
 
     linhas.append("")
     linhas.append(f"🛒 Compre aqui: {link}")
 
     return "\n".join(linhas)
+
 
