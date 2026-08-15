@@ -3,6 +3,9 @@ import json
 import hashlib
 import requests
 import re
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 API_URL = "https://open-api.affiliate.shopee.com.br/graphql"
 
@@ -99,7 +102,7 @@ def buscar_ofertas_shopee_reais(appid, secret, limit=5, ignore_list=None, log_fu
                 "User-Agent": "Mozilla/5.0"
             }
             
-            response = requests.post(API_URL, headers=headers, data=payload_json, timeout=25)
+            response = requests.post(API_URL, headers=headers, data=payload_json, timeout=25, verify=False)
             
             if response.status_code != 200:
                 log_func(f"⚠️ Erro HTTP {response.status_code} na página {page}")

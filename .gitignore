@@ -11,3 +11,5 @@ config.json
 build/
 dist/
 dist_nova/
+dist_nova_1.1/
+dist*/

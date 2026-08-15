@@ -10,7 +10,7 @@ def baixar_imagem(url, caminho_arquivo):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        response = requests.get(url, headers=headers, stream=True, timeout=10)
+        response = requests.get(url, headers=headers, stream=True, timeout=10, verify=False)
         if response.status_code == 200:
             with open(caminho_arquivo, 'wb') as f:
                 for chunk in response.iter_content(1024):

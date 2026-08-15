@@ -2,11 +2,43 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import urllib.parse
+import urllib3
 
-def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", limit=5, ignore_list=None, log_func=print):
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+def encurtar_link_ml(url):
+    """
+    Limpa e encurta URLs do Mercado Livre removendo o texto do título (slug) e filtros desnecessários,
+    preservando apenas a estrutura enxuta do produto com seu ID único (MLB).
+    """
+    if not url:
+        return ""
+        
+    # Remove fragmentos (#...)
+    clean_url = url.split('#')[0]
+    
+    # Padrão 1: Produto de Catálogo (/p/MLB12345678)
+    match_p = re.search(r'(/p/MLB\d+)', clean_url)
+    if match_p:
+        return f"https://www.mercadolivre.com.br{match_p.group(1)}"
+        
+    # Padrão 2: Anúncio Individual (MLB-1234567890 ou MLB1234567890)
+    match_mlb = re.search(r'(MLB-?\d+)', clean_url)
+    if match_mlb:
+        mlb_id = match_mlb.group(1)
+        if not mlb_id.startswith("MLB-"):
+            mlb_id = mlb_id.replace("MLB", "MLB-")
+        return f"https://produto.mercadolivre.com.br/{mlb_id}"
+        
+    # Fallback: remove query parameters (?...)
+    return clean_url.split('?')[0]
+
+
+def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", matt_word="", limit=5, ignore_list=None, log_func=print):
     """
     Busca ofertas reais da página oficial de ofertas do Mercado Livre Brasil.
     Retorna uma lista de dicionários padronizada com o atributo "fonte": "Mercado Livre".
+    Anexa os parâmetros de rastreamento matt_tool e matt_word do programa de afiliados/criadores ML em URLs curtas.
     """
     produtos = []
     
@@ -39,7 +71,7 @@ def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", limit=5, ignore_li
             "Accept-Language": "pt-BR,pt;q=0.9",
         }
         
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=15, verify=False)
         if response.status_code != 200:
             safe_log(f"[Mercado Livre] Status HTTP {response.status_code} na busca de ofertas.")
             return produtos
@@ -80,28 +112,33 @@ def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", limit=5, ignore_li
             except:
                 preco_num = 0.0
 
-            # Extrai Link
+            # Extrai e Encurta o Link
             link_el = item.select_one("a.promotion-item__link-container, a.poly-component__title, a")
             permalink = link_el["href"] if link_el and link_el.has_attr("href") else ""
             if not permalink:
                 continue
                 
-            # Corta parâmetros de rastreamento pesados do link original
-            permalink_clean = permalink.split("#")[0]
+            # Encurta a URL base do produto
+            permalink_curto = encurtar_link_ml(permalink)
 
-            # Anexa Tag de Afiliado se fornecida
-            link_afiliado = permalink_clean
-            if tag_afiliado and tag_afiliado.strip():
-                tag_clean = tag_afiliado.strip()
+            # Anexa Parâmetros de Afiliado (matt_tool e matt_word)
+            link_afiliado = permalink_curto
+            tracking_params = []
+            
+            if tag_afiliado and str(tag_afiliado).strip():
+                tracking_params.append(f"matt_tool={str(tag_afiliado).strip()}")
+            if matt_word and str(matt_word).strip():
+                tracking_params.append(f"matt_word={str(matt_word).strip()}")
+                
+            if tracking_params:
                 sep = "&" if "?" in link_afiliado else "?"
-                link_afiliado += f"{sep}matt_tool={tag_clean}"
+                link_afiliado += f"{sep}" + "&".join(tracking_params)
 
-            # Extrai Imagem
+            # Extrai Imagem em alta resolução
             img_el = item.select_one("img")
             imagem_url = ""
             if img_el:
                 imagem_url = img_el.get("data-src") or img_el.get("src") or ""
-                # Garantir boa resolução
                 if imagem_url and "-I.jpg" in imagem_url:
                     imagem_url = imagem_url.replace("-I.jpg", "-O.jpg")
                 if imagem_url and not imagem_url.startswith("http"):
@@ -129,7 +166,8 @@ if __name__ == "__main__":
     def test_log(msg):
         print(f"[TEST] {msg}")
 
-    print("Testando busca no Mercado Livre...")
-    prods = buscar_ofertas_ml_reais("fone", tag_afiliado="123456", limit=3, log_func=test_log)
+    print("Testando encurtamento de links e busca no Mercado Livre...")
+    prods = buscar_ofertas_ml_reais("fone", tag_afiliado="38835395", matt_word="joicemagalhes", limit=3, log_func=test_log)
     for p in prods:
-        print(f"-> {p['fonte']} | {p['titulo'][:40]} | R$ {p['preco']} | {p['link'][:60]}")
+        print(f"-> {p['fonte']} | {p['titulo'][:30]} | R$ {p['preco']}")
+        print(f"   Link Encurtado: {p['link']}")

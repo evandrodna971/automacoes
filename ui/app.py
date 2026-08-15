@@ -49,7 +49,8 @@ def main_app(page: ft.Page):
     # Inputs
     input_appid = ft.TextField(label="Shopee App ID", password=True, can_reveal_password=True)
     input_secret = ft.TextField(label="Shopee Secret Key", password=True, can_reveal_password=True)
-    input_tag_ml = ft.TextField(label="Tag / ID Afiliado Mercado Livre (opcional)")
+    input_tag_ml = ft.TextField(label="ML matt_tool (ex: 38835395)")
+    input_word_ml = ft.TextField(label="ML matt_word / Perfil (ex: joicemagalhes)")
     input_termo_ml = ft.TextField(label="Termo de Busca Mercado Livre", value="ofertas")
     input_grupo = ft.TextField(label="Nome do Grupo WhatsApp", value="Teste")
     input_limit = ft.TextField(label="Quantidade de Produtos (por plataforma)", value="5", keyboard_type=ft.KeyboardType.NUMBER)
@@ -85,6 +86,7 @@ def main_app(page: ft.Page):
         secret = input_secret.value
         grupo = input_grupo.value
         tag_ml = input_tag_ml.value
+        word_ml = input_word_ml.value
         termo_ml = input_termo_ml.value
         try:
             limit = int(input_limit.value)
@@ -113,7 +115,7 @@ def main_app(page: ft.Page):
 
             # 2. Busca ofertas do Mercado Livre
             add_log(f"Buscando ofertas no Mercado Livre (Termo: '{termo_ml}')...")
-            produtos_ml = buscar_ofertas_ml_reais(termo=termo_ml, tag_afiliado=tag_ml, limit=limit, ignore_list=enviados, log_func=add_log)
+            produtos_ml = buscar_ofertas_ml_reais(termo=termo_ml, tag_afiliado=tag_ml, matt_word=word_ml, limit=limit, ignore_list=enviados, log_func=add_log)
 
             # 3. Combina e embaralha produtos aleatoriamente
             produtos = produtos_shopee + produtos_ml
@@ -274,6 +276,7 @@ def main_app(page: ft.Page):
                 "appid": input_appid.value,
                 "secret": input_secret.value,
                 "tag_ml": input_tag_ml.value,
+                "word_ml": input_word_ml.value,
                 "termo_ml": input_termo_ml.value,
                 "grupo": input_grupo.value,
                 "limit": input_limit.value,
@@ -293,6 +296,7 @@ def main_app(page: ft.Page):
     input_appid.value = current_config.get("appid", "")
     input_secret.value = current_config.get("secret", "")
     input_tag_ml.value = current_config.get("tag_ml", "")
+    input_word_ml.value = current_config.get("word_ml", "")
     input_termo_ml.value = current_config.get("termo_ml", "ofertas")
     input_grupo.value = current_config.get("grupo", "Teste")
     input_limit.value = current_config.get("limit", "5")
@@ -307,6 +311,7 @@ def main_app(page: ft.Page):
         ft.Text("Mercado Livre", size=18, weight=ft.FontWeight.BOLD, color="yellow"),
         input_termo_ml,
         input_tag_ml,
+        input_word_ml,
         ft.Divider(),
         ft.Text("WhatsApp & Automação", size=18, weight=ft.FontWeight.BOLD, color="green"),
         input_grupo,
@@ -499,17 +504,20 @@ def main_app(page: ft.Page):
         ], alignment=ft.MainAxisAlignment.CENTER)
     ], expand=True) # Revert to expand
     
-    # Content Visibility Management
+    # Visibilidade inicial das abas
     dashboard_content.visible = True
     config_content.visible = False
     history_content.visible = False
     scheduler_content.visible = False
 
-    # Custom Navigation Logic
+    # Nav Buttons (definidos antes do page.add)
+    btn_dash = ft.ElevatedButton("Dashboard", icon="dashboard")
+    btn_conf = ft.ElevatedButton("Configurações", icon="settings")
+    btn_hist = ft.ElevatedButton("Histórico", icon="history")
+    btn_sche = ft.ElevatedButton("Agendamento", icon="schedule")
+
     def update_nav_styles(selected_index):
-        # Update buttons style based on selection
-        # Using string literals for colors as ft.colors is not available in this version
-        active_color = "#455A64" # Blue Grey 700
+        active_color = "#455A64"
         btn_dash.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 0 else None)
         btn_conf.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 1 else None)
         btn_hist.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 2 else None)
@@ -521,79 +529,77 @@ def main_app(page: ft.Page):
         config_content.visible = (idx == 1)
         history_content.visible = (idx == 2)
         scheduler_content.visible = (idx == 3)
-        
-        if idx == 2: # Reload history
+        if idx == 2:
             load_history()
-        
-        if idx == 3: # Reload scheduler list to fix layout
+        if idx == 3:
             update_times_list()
-            
         update_nav_styles(idx)
         page.update()
 
-    # Nav Buttons
-    btn_dash = ft.ElevatedButton("Dashboard", icon="dashboard", on_click=lambda e: navigate(0))
-    btn_conf = ft.ElevatedButton("Configurações", icon="settings", on_click=lambda e: navigate(1))
-    btn_hist = ft.ElevatedButton("Histórico", icon="history", on_click=lambda e: navigate(2))
-    btn_sche = ft.ElevatedButton("Agendamento", icon="schedule", on_click=lambda e: navigate(3))
+    btn_dash.on_click = lambda e: navigate(0)
+    btn_conf.on_click = lambda e: navigate(1)
+    btn_hist.on_click = lambda e: navigate(2)
+    btn_sche.on_click = lambda e: navigate(3)
 
-    # Initial Style
     update_nav_styles(0)
 
     # Top Navigation Row
     nav_row = ft.Container(
         content=ft.Row([
-            btn_dash,
-            btn_conf,
-            btn_hist,
-            btn_sche
+            btn_dash, btn_conf, btn_hist, btn_sche
         ], alignment=ft.MainAxisAlignment.CENTER),
         padding=10,
         bgcolor="#111111"
     )
 
-    page.add(
-        nav_row,
-        ft.Divider(),
-        ft.Column([
+    # Content area - expande e controla qual aba está visível
+    content_area = ft.Column(
+        controls=[
             dashboard_content,
             config_content,
             history_content,
             scheduler_content
-        ], expand=True),
-        ft.Divider(),
-        ft.Column([
-            ft.Text("Logs do Sistema", size=16, weight=ft.FontWeight.BOLD),
-            log_container
-        ], horizontal_alignment=ft.CrossAxisAlignment.STRETCH, expand=False)
+        ],
+        expand=True,
+        scroll=ft.ScrollMode.AUTO
     )
-    
+
+    # Log area - fica fixo na parte inferior, sem expandir sobre o conteúdo
+    log_area = ft.Column(
+        controls=[
+            ft.Divider(),
+            ft.Text("Logs do Sistema", size=14, weight=ft.FontWeight.BOLD, color="grey"),
+            log_container
+        ],
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH
+    )
+
+    # Layout principal: nav + conteúdo expandindo + log fixo embaixo
+    page.add(
+        ft.Column(
+            controls=[
+                nav_row,
+                ft.Divider(height=1),
+                content_area,
+                log_area,
+            ],
+            expand=True,
+            spacing=0
+        )
+    )
+
     # Manual assign to ensure variables are linked to the controls in the UI tree
-    # dashboard_content -> 2nd child of column -> Row -> buttons
-    # Structure: Column([Text, Row(containers), Divider, Text, Row(buttons)])
-    # The Row within dashboard_content is at index 4 (0:Text, 1:Row, 2:Divider, 3:Text, 4:Row)
-    # Let's double check dashboard_content structure in previous reads
-    # dashboard_content = ft.Column([
-    #    ft.Text("Dashboard"...), 0
-    #    ft.Row([...]), 1
-    #    ft.Divider(), 2
-    #    ft.Text("Ações Rápidas"...), 3
-    #    ft.Row([...]) 4
-    # ])
-    
-    # So buttons are in dashboard_content.controls[4]
     btn_iniciar = dashboard_content.controls[4].controls[0]
     btn_stop = dashboard_content.controls[4].controls[1]
-    
+
     # Init load
     load_history()
 
-    # Load Scheduler Config (Must be done after components are initialized)
+    # Load Scheduler Config
     try:
         scheduled_times.extend(current_config.get("scheduler_times", []))
         update_times_list()
     except Exception as e:
         print(f"Erro ao carregar config do agendador: {e}")
 
-    # Delayed maximization to ensure window is ready
     page.update()
