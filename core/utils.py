@@ -72,17 +72,16 @@ def formatar_mensagem_produto(produto, cupom=None):
         por_linha += f" ({desconto_pct})"
     linhas.append(por_linha)
 
-    # Se houver cupom associado
+    # Se houver cupom digitável real associado
     if cupom:
-        desc_cupom = cupom.get("discount_text") or cupom.get("title", "")
-        code = cupom.get("code", "")
+        code = (cupom.get("code") or "").strip().upper()
         if code and code not in ["CUPOM_SHOPEE", "CUPOM_NO_ANUNCIO"] and not code.startswith("ML_"):
+            desc_cupom = cupom.get("discount_text") or cupom.get("title", "")
             linhas.append(f"🏷️ Cupom: *[ {code} ]* ({desc_cupom})")
-        else:
-            linhas.append(f"🏷️ Cupom/Desconto: *{desc_cupom}*")
 
     linhas.append("")
     linhas.append(f"🛒 Compre aqui: {link}")
+
 
     return "\n".join(linhas)
 

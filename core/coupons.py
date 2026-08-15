@@ -133,23 +133,9 @@ class SmartCouponMatcher:
     @classmethod
     def match(cls, produto, cupons_disponiveis=None):
         """
-        Encontra o melhor cupom compatível para o produto.
+        Encontra o melhor cupom digitável compatível para o produto.
         Retorna o dicionário do cupom ou None.
         """
-        # Se o produto já possui uma tag de cupom direta do card (ex: Mercado Livre)
-        cupom_tag_direta = produto.get("cupom_tag", "")
-        if cupom_tag_direta:
-            return {
-                "code": "CUPOM_NO_ANUNCIO",
-                "marketplace": produto.get("fonte", "Mercado Livre"),
-                "title": cupom_tag_direta,
-                "discount_text": cupom_tag_direta,
-                "min_value": 0.0,
-                "category_tags": "geral",
-                "link": produto.get("link", ""),
-                "expires_at": ""
-            }
-
         # Consulta cupons disponíveis
         if cupons_disponiveis is None:
             cupons_disponiveis = obter_cupons_validos(marketplace=produto.get("fonte"))
@@ -160,6 +146,11 @@ class SmartCouponMatcher:
         # Avalia cada cupom
         candidatos = []
         for cupom in cupons_disponiveis:
+            # Só considera cupons com código digitável real (não marcadores genéricos)
+            code = (cupom.get("code") or "").strip().upper()
+            if not code or code in ["CUPOM_SHOPEE", "CUPOM_NO_ANUNCIO"] or code.startswith("ML_"):
+                continue
+
             valido, motivo = cls.validar_cupom_para_produto(cupom, produto)
             if valido:
                 candidatos.append(cupom)
@@ -175,6 +166,7 @@ class SmartCouponMatcher:
 
         candidatos.sort(key=score_cupom, reverse=True)
         return candidatos[0]
+
 
 
 def sincronizar_todos_os_cupons(appid="", secret="", tag_ml="", matt_word="", log_func=print):
