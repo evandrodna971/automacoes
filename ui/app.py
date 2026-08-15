@@ -1,5 +1,5 @@
 import flet as ft
-from database.db import init_db, salvar_historico, ler_historico, obter_produtos_enviados_sucesso
+from database.db import init_db, salvar_historico, ler_historico, obter_produtos_enviados_sucesso, obter_cupons_validos
 import threading
 import time
 import os
@@ -7,16 +7,18 @@ import random
 from core.shopee import buscar_ofertas_shopee_reais
 from core.mercadolivre import buscar_ofertas_ml_reais
 from core.whatsapp import WhatsAppBot
-from core.utils import baixar_imagem, copy_image_to_clipboard
+from core.utils import baixar_imagem, copy_image_to_clipboard, formatar_mensagem_produto
+from core.coupons import SmartCouponMatcher, sincronizar_todos_os_cupons
 
 def main_app(page: ft.Page):
-    page.title = "ZapFinder Automation v2.0"
+    page.title = "ZapFinder Automation v1.2"
     page.theme_mode = ft.ThemeMode.DARK
     page.window_maximized = True
     page.padding = 20
     
     # Initialize DB (in thread to not block UI)
     threading.Thread(target=init_db).start()
+
 
     # --- UI COMPONENTS ---
     
@@ -44,6 +46,7 @@ def main_app(page: ft.Page):
 
     # Status Indicators
     txt_enviados = ft.Text("0", size=40, weight=ft.FontWeight.BOLD)
+    txt_cupons = ft.Text("0", size=40, weight=ft.FontWeight.BOLD, color="orange")
     txt_status = ft.Text("Parado", size=40, weight=ft.FontWeight.BOLD, color="red")
 
     # Inputs
@@ -80,6 +83,52 @@ def main_app(page: ft.Page):
             )
         page.update()
 
+    # Coupons Data Table
+    coupons_table = ft.DataTable(
+        columns=[
+            ft.DataColumn(ft.Text("Marketplace")),
+            ft.DataColumn(ft.Text("Cupom / Oferta")),
+            ft.DataColumn(ft.Text("Desconto")),
+            ft.DataColumn(ft.Text("Mínimo")),
+            ft.DataColumn(ft.Text("Categorias")),
+            ft.DataColumn(ft.Text("Validade")),
+        ],
+        rows=[]
+    )
+
+    def load_coupons():
+        coupons_table.rows.clear()
+        cupons = obter_cupons_validos()
+        txt_cupons.value = str(len(cupons))
+        for c in cupons:
+            min_txt = f"R$ {c['min_value']:.2f}" if c.get('min_value', 0) > 0 else "Sem mín."
+            val_txt = c.get('expires_at') or "Indeterminado"
+            coupons_table.rows.append(
+                ft.DataRow(cells=[
+                    ft.DataCell(ft.Text(c.get('marketplace', ''))),
+                    ft.DataCell(ft.Text(c.get('title', '')[:35] + ("..." if len(c.get('title', '')) > 35 else ""))),
+                    ft.DataCell(ft.Text(c.get('discount_text', ''))),
+                    ft.DataCell(ft.Text(min_txt)),
+                    ft.DataCell(ft.Text(c.get('category_tags', ''))),
+                    ft.DataCell(ft.Text(val_txt)),
+                ])
+            )
+        page.update()
+
+    def on_click_sync_cupons(e=None):
+        def _sync_worker():
+            add_log("🔄 Buscando cupons atuais nas plataformas...")
+            sincronizar_todos_os_cupons(
+                appid=input_appid.value,
+                secret=input_secret.value,
+                tag_ml=input_tag_ml.value,
+                matt_word=input_word_ml.value,
+                log_func=add_log
+            )
+            load_coupons()
+            add_log("✅ Lista de cupons atualizada com sucesso!")
+        threading.Thread(target=_sync_worker, daemon=True).start()
+
     # --- AUTOMATION LOGIC ---
     def run_shopee_process():
         appid = input_appid.value
@@ -102,6 +151,19 @@ def main_app(page: ft.Page):
         page.update()
 
         try:
+            # 0. Sincronização inicial de cupons se necessário
+            cupons_ativos = obter_cupons_validos()
+            if not cupons_ativos:
+                add_log("Base de cupons vazia. Sincronizando cupons antes do envio...")
+                cupons_ativos = sincronizar_todos_os_cupons(
+                    appid=appid,
+                    secret=secret,
+                    tag_ml=tag_ml,
+                    matt_word=word_ml,
+                    log_func=add_log
+                )
+                load_coupons()
+
             enviados = obter_produtos_enviados_sucesso()
             produtos_shopee = []
             produtos_ml = []
@@ -149,7 +211,7 @@ def main_app(page: ft.Page):
                 bot.fechar()
                 return
 
-            # 5. Enviar Produtos
+            # 5. Enviar Produtos com Validação e Matching de Cupons
             enviados_count = 0
             for i, p in enumerate(produtos):
                 # Check for stop signal
@@ -160,13 +222,19 @@ def main_app(page: ft.Page):
                 fonte = p.get('fonte', 'Shopee')
                 add_log(f"Enviando {i+1}/{len(produtos)} [{fonte}]: {p['titulo'][:25]}...")
                 
+                # Validação e Matching de Cupom Estrito
+                cupom_aplicado = SmartCouponMatcher.match(p, cupons_ativos)
+                if cupom_aplicado:
+                    desc_tag = cupom_aplicado.get('discount_text') or cupom_aplicado.get('title')
+                    add_log(f"   🏷️ Cupom associado: {desc_tag}")
+
                 # Baixar imagem
                 img_path = os.path.abspath(f"temp_prod_{i}.jpg")
                 if p.get('imagem_url'):
                     baixar_imagem(p['imagem_url'], img_path)
                 
-                # Formatar mensagem
-                msg = f"*{p['titulo']}*\n\n🛍️ Origem: {fonte}\n🔥 Por: R$ {p['preco']}\n\n🛒 Compre aqui: {p['link']}"
+                # Formatar mensagem com cupom integrado
+                msg = formatar_mensagem_produto(p, cupom_aplicado)
                 
                 # Enviar
                 sucesso = False
@@ -240,6 +308,16 @@ def main_app(page: ft.Page):
             ),
             ft.Container(
                 content=ft.Column([
+                    ft.Text("Cupons Ativos", size=14),
+                    txt_cupons
+                ]),
+                padding=20,
+                border_radius=10,
+                bgcolor="#263238",
+                expand=True
+            ),
+            ft.Container(
+                content=ft.Column([
                     ft.Text("Status do Bot", size=14),
                     txt_status
                 ]),
@@ -253,9 +331,11 @@ def main_app(page: ft.Page):
         ft.Text("Ações Rápidas", size=20),
         ft.Row([
             ft.ElevatedButton("Iniciar Envio (Shopee + Mercado Livre)", icon="play_arrow", on_click=on_click_iniciar, ref=btn_iniciar_ref),
+            ft.ElevatedButton("Atualizar Cupons", icon="sync", on_click=on_click_sync_cupons),
             ft.ElevatedButton("Parar", icon="stop", color="red", on_click=on_click_parar, disabled=True, ref=btn_stop_ref),
         ])
     ])
+
 
     import json
 
@@ -319,6 +399,22 @@ def main_app(page: ft.Page):
         ft.ElevatedButton("Salvar Configurações", icon="save", on_click=save_config)
     ], scroll=ft.ScrollMode.AUTO)
 
+    # Coupons Tab Content
+    coupons_content = ft.Column([
+        ft.Text("Cupons e Promoções Disponíveis", size=30, weight=ft.FontWeight.BOLD),
+        ft.Row([
+            ft.ElevatedButton("Atualizar Cupons (API + ML)", icon="sync", on_click=on_click_sync_cupons),
+            ft.ElevatedButton("Recarregar Tabela", icon="refresh", on_click=lambda e: load_coupons()),
+        ]),
+        ft.Container(
+            content=ft.Column([coupons_table], scroll=ft.ScrollMode.ALWAYS),
+            expand=True,
+            border=ft.border.all(1, "grey"),
+            border_radius=10,
+            padding=10
+        )
+    ], expand=True, scroll=ft.ScrollMode.ALWAYS, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+
     # History Tab
     history_content = ft.Column([
         ft.Text("Histórico de Envios", size=30, weight=ft.FontWeight.BOLD),
@@ -327,35 +423,45 @@ def main_app(page: ft.Page):
     ], expand=True, scroll=ft.ScrollMode.ALWAYS, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
 
     # --- SCHEDULER LOGIC ---
-    # --- SCHEDULER LOGIC ---
-    # --- SCHEDULER LOGIC ---
     def run_scheduler_loop(times_list):
         add_log(f"Agendador iniciado. Horários: {times_list}")
         
         last_run_minute = None
+        last_sync_date = None
 
         while hasattr(page, "scheduler_running") and page.scheduler_running:
             import datetime
             now = datetime.datetime.now()
             current_time = now.strftime("%H:%M")
+            today_date = now.strftime("%Y-%m-%d")
             
             # Verifica se já rodou neste minuto para evitar duplo disparo
-            # Verifica se o horario atual esta na lista de agendados
             if current_time in times_list and current_time != last_run_minute:
                 add_log(f"Horário agendado ({current_time}) atingido! Executando...")
+                
+                # Sincronização automática no primeiro horário do dia
+                if last_sync_date != today_date:
+                    add_log(f"🌅 Primeiro ciclo do dia ({today_date}). Sincronizando cupons antes do disparo...")
+                    try:
+                        sincronizar_todos_os_cupons(
+                            appid=input_appid.value,
+                            secret=input_secret.value,
+                            tag_ml=input_tag_ml.value,
+                            matt_word=input_word_ml.value,
+                            log_func=add_log
+                        )
+                        load_coupons()
+                        last_sync_date = today_date
+                    except Exception as ex_sync:
+                        add_log(f"Aviso ao sincronizar cupons do dia: {ex_sync}")
+
                 try:
                     run_shopee_process()
                     last_run_minute = current_time
-                    # Incrementa contador (visual apenas, se tivesse)
                 except Exception as e:
                     add_log(f"Erro no agendador: {e}")
-            
-            # Reset last_run_minute se mudou o minuto para permitir executar se tiver outro horario colado
-            # (Ex: 09:00 e 09:01)
-            if current_time != last_run_minute:
-                 pass
 
-            # Aguarda 5s antes de checar novamente (polling mais rapido que 30s é melhor pra não perder o minuto)
+            # Aguarda 5s antes de checar novamente
             for _ in range(5):
                 if not hasattr(page, "scheduler_running") or not page.scheduler_running:
                     break
@@ -390,8 +496,6 @@ def main_app(page: ft.Page):
         add_log("Parando agendador (aguarde)...")
         page.update()
 
-    # Scheduler Logic & UI
-    
     # Data storage for times
     scheduled_times = []
     
@@ -411,7 +515,7 @@ def main_app(page: ft.Page):
                             width=30,
                             height=30,
                             alignment=ft.alignment.Alignment(0, 0),
-                            bgcolor="#D32F2F" # Red 700
+                            bgcolor="#D32F2F"
                         )
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     padding=10,
@@ -426,7 +530,7 @@ def main_app(page: ft.Page):
         if t in scheduled_times:
             scheduled_times.remove(t)
             update_times_list()
-            save_config(None) # Auto-save
+            save_config(None)
 
     def add_time_handler(e):
         try:
@@ -436,14 +540,13 @@ def main_app(page: ft.Page):
                 page.update()
                 return
                 
-            # Simple validation
             if len(t) == 5 and t[2] == ":":
                  if t not in scheduled_times:
                      scheduled_times.append(t)
                      scheduled_times.sort()
                      input_time.value = ""
                      update_times_list()
-                     save_config(None) # Auto-save
+                     save_config(None)
                  else:
                      input_time.error_text = "Horário já existe"
             else:
@@ -492,7 +595,7 @@ def main_app(page: ft.Page):
             border_radius=5,
             padding=5,
             bgcolor="#1A1A1A",
-            expand=True # Revert to expand
+            expand=True
         ),
         ft.Divider(),
         ft.Row([
@@ -502,16 +605,18 @@ def main_app(page: ft.Page):
         ft.Row([
             ft.Text("Nota: O computador deve permanecer ligado.", italic=True)
         ], alignment=ft.MainAxisAlignment.CENTER)
-    ], expand=True) # Revert to expand
+    ], expand=True)
     
     # Visibilidade inicial das abas
     dashboard_content.visible = True
+    coupons_content.visible = False
     config_content.visible = False
     history_content.visible = False
     scheduler_content.visible = False
 
-    # Nav Buttons (definidos antes do page.add)
+    # Nav Buttons
     btn_dash = ft.ElevatedButton("Dashboard", icon="dashboard")
+    btn_coup = ft.ElevatedButton("Cupons", icon="local_offer")
     btn_conf = ft.ElevatedButton("Configurações", icon="settings")
     btn_hist = ft.ElevatedButton("Histórico", icon="history")
     btn_sche = ft.ElevatedButton("Agendamento", icon="schedule")
@@ -519,43 +624,49 @@ def main_app(page: ft.Page):
     def update_nav_styles(selected_index):
         active_color = "#455A64"
         btn_dash.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 0 else None)
-        btn_conf.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 1 else None)
-        btn_hist.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 2 else None)
-        btn_sche.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 3 else None)
+        btn_coup.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 1 else None)
+        btn_conf.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 2 else None)
+        btn_hist.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 3 else None)
+        btn_sche.style = ft.ButtonStyle(bgcolor=active_color if selected_index == 4 else None)
         page.update()
 
     def navigate(idx):
         dashboard_content.visible = (idx == 0)
-        config_content.visible = (idx == 1)
-        history_content.visible = (idx == 2)
-        scheduler_content.visible = (idx == 3)
-        if idx == 2:
-            load_history()
+        coupons_content.visible = (idx == 1)
+        config_content.visible = (idx == 2)
+        history_content.visible = (idx == 3)
+        scheduler_content.visible = (idx == 4)
+        if idx == 1:
+            load_coupons()
         if idx == 3:
+            load_history()
+        if idx == 4:
             update_times_list()
         update_nav_styles(idx)
         page.update()
 
     btn_dash.on_click = lambda e: navigate(0)
-    btn_conf.on_click = lambda e: navigate(1)
-    btn_hist.on_click = lambda e: navigate(2)
-    btn_sche.on_click = lambda e: navigate(3)
+    btn_coup.on_click = lambda e: navigate(1)
+    btn_conf.on_click = lambda e: navigate(2)
+    btn_hist.on_click = lambda e: navigate(3)
+    btn_sche.on_click = lambda e: navigate(4)
 
     update_nav_styles(0)
 
     # Top Navigation Row
     nav_row = ft.Container(
         content=ft.Row([
-            btn_dash, btn_conf, btn_hist, btn_sche
+            btn_dash, btn_coup, btn_conf, btn_hist, btn_sche
         ], alignment=ft.MainAxisAlignment.CENTER),
         padding=10,
         bgcolor="#111111"
     )
 
-    # Content area - expande e controla qual aba está visível
+    # Content area
     content_area = ft.Column(
         controls=[
             dashboard_content,
+            coupons_content,
             config_content,
             history_content,
             scheduler_content
@@ -564,7 +675,7 @@ def main_app(page: ft.Page):
         scroll=ft.ScrollMode.AUTO
     )
 
-    # Log area - fica fixo na parte inferior, sem expandir sobre o conteúdo
+    # Log area
     log_area = ft.Column(
         controls=[
             ft.Divider(),
@@ -574,7 +685,6 @@ def main_app(page: ft.Page):
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH
     )
 
-    # Layout principal: nav + conteúdo expandindo + log fixo embaixo
     page.add(
         ft.Column(
             controls=[
@@ -590,10 +700,11 @@ def main_app(page: ft.Page):
 
     # Manual assign to ensure variables are linked to the controls in the UI tree
     btn_iniciar = dashboard_content.controls[4].controls[0]
-    btn_stop = dashboard_content.controls[4].controls[1]
+    btn_stop = dashboard_content.controls[4].controls[2]
 
-    # Init load
+    # Init loads
     load_history()
+    load_coupons()
 
     # Load Scheduler Config
     try:
@@ -603,3 +714,4 @@ def main_app(page: ft.Page):
         print(f"Erro ao carregar config do agendador: {e}")
 
     page.update()
+

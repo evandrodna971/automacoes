@@ -147,3 +147,109 @@ def buscar_ofertas_shopee_reais(appid, secret, limit=5, ignore_list=None, log_fu
         log_func(f"❌ Erro geral na API: {str(e)[:100]}")
     
     return produtos[:limit]
+
+def mapear_categoria_shopee(nome_oferta):
+    """Mapeia nomes de ofertas da Shopee para tags semânticas em português"""
+    nome = (nome_oferta or "").lower()
+    tags = []
+    
+    if any(k in nome for k in ["health", "saude", "suplement"]):
+        tags.extend(["saude", "suplementos", "beleza", "cuidados"])
+    if any(k in nome for k in ["fashion", "accessories", "moda", "acessorios", "joias"]):
+        tags.extend(["moda", "acessorios", "relogios", "oculos"])
+    if any(k in nome for k in ["home", "appliance", "kitchen", "casa", "cozinha", "eletro"]):
+        tags.extend(["casa", "eletrodomesticos", "cozinha", "utilidades"])
+    if any(k in nome for k in ["clothes", "roupa", "vestuario", "shirt", "pant"]):
+        tags.extend(["moda", "roupas", "vestuario"])
+    if any(k in nome for k in ["shoe", "calcado", "tenis", "sapato", "sandalia"]):
+        tags.extend(["moda", "calcados", "tenis", "sapatos"])
+    if any(k in nome for k in ["computer", "electronic", "tech", "tecnologia", "celular", "gamer"]):
+        tags.extend(["tecnologia", "informatica", "eletronicos", "gamer"])
+    if any(k in nome for k in ["beauty", "beleza", "makeup", "perfum"]):
+        tags.extend(["beleza", "maquiagem", "perfumes", "estetica"])
+    if any(k in nome for k in ["sport", "esporte", "fitness", "academia"]):
+        tags.extend(["esporte", "fitness", "academia"])
+    if any(k in nome for k in ["baby", "kids", "toy", "brinquedo", "infantil"]):
+        tags.extend(["bebe", "infantil", "brinquedos", "criancas"])
+    if any(k in nome for k in ["free shipping", "frete gratis", "voucher", "cupom", "bau"]):
+        tags.append("geral")
+        
+    if not tags:
+        tags.append("geral")
+        
+    return ",".join(sorted(list(set(tags))))
+
+def buscar_cupons_shopee_api(appid, secret, limit=20, log_func=print):
+    """Busca campanhas de cupons e vouchers oficiais de afiliados na API Shopee GraphQL"""
+    cupons = []
+    
+    if not appid or not secret or len(secret) != 32:
+        log_func("⚠️ Credenciais da Shopee ausentes ou inválidas para busca de cupons.")
+        return cupons
+        
+    try:
+        log_func("🎟️ Consultando campanhas e cupons de afiliados na Shopee API...")
+        query = f"""{{
+  shopeeOfferV2(limit: {limit}, page: 1) {{
+    nodes {{
+      offerName
+      offerLink
+      imageUrl
+      periodStartTime
+      periodEndTime
+    }}
+  }}
+}}"""
+        payload_dict = {"query": query}
+        payload_json = json.dumps(payload_dict, separators=(',', ':'))
+        timestamp, signature = gerar_assinatura(appid, secret, payload_json)
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"SHA256 Credential={appid}, Timestamp={timestamp}, Signature={signature}",
+            "User-Agent": "Mozilla/5.0"
+        }
+        
+        response = requests.post(API_URL, headers=headers, data=payload_json, timeout=20, verify=False)
+        if response.status_code != 200:
+            log_func(f"⚠️ Erro HTTP {response.status_code} ao buscar cupons na Shopee.")
+            return cupons
+            
+        dados = response.json()
+        nodes = dados.get("data", {}).get("shopeeOfferV2", {}).get("nodes", [])
+        
+        for node in nodes:
+            nome = node.get("offerName", "")
+            link = node.get("offerLink", "")
+            end_timestamp = node.get("periodEndTime", 0)
+            
+            # Formata data de expiração se timestamp válido
+            expires_at = ""
+            if end_timestamp and end_timestamp < 30000000000: # Evita timestamps infinitos no futuro distante
+                try:
+                    expires_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(end_timestamp))
+                except:
+                    expires_at = ""
+            
+            tags = mapear_categoria_shopee(nome)
+            
+            # Limpa e enxuga o título
+            titulo_limpo = re.sub(r'^(New\s+)?(BAU\s+)?(Comm\s*-\s*)?', '', nome, flags=re.IGNORECASE).strip()
+            
+            cupons.append({
+                "code": "CUPOM_SHOPEE",
+                "marketplace": "Shopee",
+                "title": f"Campanha Shopee: {titulo_limpo}",
+                "discount_text": "Cupom & Oferta Oficial Shopee",
+                "min_value": 0.0,
+                "category_tags": tags,
+                "link": link,
+                "expires_at": expires_at
+            })
+            
+        log_func(f"✅ {len(cupons)} campanhas/cupons de afiliados Shopee carregados com sucesso.")
+    except Exception as e:
+        log_func(f"❌ Erro ao buscar cupons Shopee via API: {e}")
+        
+    return cupons
+

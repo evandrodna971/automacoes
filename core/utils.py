@@ -38,3 +38,34 @@ def copy_image_to_clipboard(image_path):
     except Exception as e:
         print(f"Erro ao copiar imagem para clipboard: {e}")
         return False
+
+def formatar_mensagem_produto(produto, cupom=None):
+    """
+    Formata o texto padrão de envio para o WhatsApp, incluindo destaque de cupom quando disponível.
+    """
+    titulo = produto.get("titulo", "")
+    fonte = produto.get("fonte", "Oferta")
+    preco = produto.get("preco", "0.00")
+    link = produto.get("link", "")
+
+    linhas = [
+        f"*{titulo}*",
+        "",
+        f"🛍️ Origem: {fonte}",
+        f"🔥 Por: R$ {preco}"
+    ]
+
+    # Se houver cupom associado
+    if cupom:
+        desc_cupom = cupom.get("discount_text") or cupom.get("title", "")
+        code = cupom.get("code", "")
+        if code and code not in ["CUPOM_SHOPEE", "CUPOM_NO_ANUNCIO"] and not code.startswith("ML_"):
+            linhas.append(f"🏷️ Cupom: *{code}* ({desc_cupom})")
+        else:
+            linhas.append(f"🏷️ Desconto: *{desc_cupom}*")
+
+    linhas.append("")
+    linhas.append(f"🛒 Compre aqui: {link}")
+
+    return "\n".join(linhas)
+

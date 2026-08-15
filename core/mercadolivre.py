@@ -144,6 +144,10 @@ def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", matt_word="", limi
                 if imagem_url and not imagem_url.startswith("http"):
                     imagem_url = "https:" + imagem_url
 
+            # Extrai tag de Cupom no Card do Mercado Livre se houver
+            coupon_el = item.select_one(".poly-component__coupons, .poly-coupons__wrapper, .poly-coupons__pill, [class*='coupon']")
+            cupom_tag = coupon_el.get_text(strip=True) if coupon_el else ""
+
             produtos.append({
                 "titulo": titulo_limpo,
                 "preco": f"{preco_num:.2f}",
@@ -151,7 +155,8 @@ def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", matt_word="", limi
                 "link": link_afiliado,
                 "afiliado": link_afiliado,
                 "fonte": "Mercado Livre",
-                "imagem_url": imagem_url
+                "imagem_url": imagem_url,
+                "cupom_tag": cupom_tag
             })
 
         safe_log(f"[Mercado Livre] Sucesso: {len(produtos)} produtos válidos extraídos.")
@@ -160,6 +165,108 @@ def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", matt_word="", limi
         safe_log(f"[Mercado Livre] Erro ao buscar ofertas: {e}")
 
     return produtos
+
+
+def mapear_categoria_ml(texto_cupom):
+    """Mapeia o texto ou descrição do cupom do ML para tags semânticas"""
+    txt = (texto_cupom or "").lower()
+    tags = []
+    
+    if any(k in txt for k in ["celular", "smartphone", "notebook", "fone", "tech", "tecnologia", "informatica", "gamer", "tv", "audio"]):
+        tags.extend(["tecnologia", "informatica", "eletronicos", "gamer"])
+    if any(k in txt for k in ["eletro", "geladeira", "fogao", "microondas", "lavadora", "cozinha", "casa"]):
+        tags.extend(["casa", "eletrodomesticos", "cozinha", "utilidades"])
+    if any(k in txt for k in ["moda", "roupa", "tenis", "calcado", "vestuario", "acessorios"]):
+        tags.extend(["moda", "calcados", "roupas", "acessorios"])
+    if any(k in txt for k in ["beleza", "perfum", "cabelo", "maquiagem", "saude", "suplement"]):
+        tags.extend(["beleza", "perfumes", "saude", "suplementos"])
+    if any(k in txt for k in ["ferramenta", "construcao", "furadeira", "automotivo", "pneu"]):
+        tags.extend(["ferramentas", "automotivo", "construcao"])
+    if any(k in txt for k in ["livro", "papelaria", "escritorio"]):
+        tags.extend(["livros", "papelaria"])
+    if any(k in txt for k in ["primeira compra", "site todo", "geral", "frete", "todos os produtos"]):
+        tags.append("geral")
+        
+    if not tags:
+        tags.append("geral")
+        
+    return ",".join(sorted(list(set(tags))))
+
+
+def buscar_cupons_ml_central(tag_afiliado="", matt_word="", log_func=print):
+    """Busca cupons e destaques promocionais vigentes no Mercado Livre"""
+    cupons = []
+    
+    def safe_log(msg):
+        try:
+            log_func(msg)
+        except Exception:
+            try:
+                clean_msg = msg.encode('ascii', errors='ignore').decode('ascii')
+                log_func(clean_msg)
+            except Exception:
+                pass
+
+    try:
+        safe_log("[Mercado Livre] Consultando página de ofertas e cupons do Mercado Livre...")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "pt-BR,pt;q=0.9",
+        }
+        
+        url_ofertas = "https://www.mercadolivre.com.br/ofertas"
+        resp = requests.get(url_ofertas, headers=headers, timeout=15, verify=False)
+        
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            
+            # 1. Procura cupons em pílulas e banners de cupons
+            pills = soup.select(".poly-component__coupons, .poly-coupons__wrapper, .poly-coupons__pill, [class*='coupon']")
+            vistos = set()
+            
+            for p in pills:
+                txt = p.get_text(strip=True)
+                if not txt or txt in vistos or len(txt) > 80:
+                    continue
+                vistos.add(txt)
+                
+                # Extrai valor de desconto se presente (ex: R$30OFF ou 15%OFF)
+                desc_match = re.search(r'(R\$\s*\d+|\d+%)', txt, re.IGNORECASE)
+                desc_val = desc_match.group(1) if desc_match else "Desconto Especial"
+                
+                # Extrai valor mínimo se presente
+                min_match = re.search(r'acima de R\$\s*(\d+)', txt, re.IGNORECASE)
+                min_val = float(min_match.group(1)) if min_match else 0.0
+                
+                tags = mapear_categoria_ml(txt)
+                
+                # Gera link com afiliado se fornecido
+                link_cupom = "https://www.mercadolivre.com.br/ofertas"
+                if tag_afiliado or matt_word:
+                    tracking = []
+                    if tag_afiliado:
+                        tracking.append(f"matt_tool={tag_afiliado}")
+                    if matt_word:
+                        tracking.append(f"matt_word={matt_word}")
+                    link_cupom += "?" + "&".join(tracking)
+                    
+                cupons.append({
+                    "code": f"ML_{desc_val.replace(' ', '').replace('$', '')}",
+                    "marketplace": "Mercado Livre",
+                    "title": f"Cupom Mercado Livre: {txt}",
+                    "discount_text": txt,
+                    "min_value": min_val,
+                    "category_tags": tags,
+                    "link": link_cupom,
+                    "expires_at": ""
+                })
+                
+        safe_log(f"[Mercado Livre] {len(cupons)} cupons/destaques promocionais identificados.")
+    except Exception as e:
+        safe_log(f"[Mercado Livre] Erro ao extrair cupons: {e}")
+        
+    return cupons
 
 
 if __name__ == "__main__":
