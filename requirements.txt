@@ -8,3 +8,5 @@ flet[desktop]>=0.21.0
 winshell>=0.6
 pywin32>=306
 pyinstaller
+google-genai>=2.18.0
+google-generativeai>=0.8.0

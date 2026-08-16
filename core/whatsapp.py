@@ -45,6 +45,18 @@ class WhatsAppBot:
             self.log(f"Erro ao iniciar driver: {e}")
             return False
 
+    def fechar_popups_aviso(self):
+        """Fecha qualquer modal ou popup de aviso de atualização/boas-vindas do WhatsApp"""
+        try:
+            botoes = self.driver.find_elements(By.XPATH, "//button[contains(., 'Continuar') or contains(., 'Fechar') or contains(., 'Entendi') or contains(., 'OK')] | //div[@role='button'][contains(., 'Continuar') or contains(., 'Fechar') or contains(., 'Entendi')] | //span[@data-icon='x']")
+            for btn in botoes:
+                if btn.is_displayed():
+                    btn.click()
+                    self.log("Aviso/popup inicial do WhatsApp fechado com sucesso.")
+                    time.sleep(1)
+        except:
+            pass
+
     def aguardar_login(self, timeout=120):
         """Aguardar login no WhatsApp Web"""
         try:
@@ -60,6 +72,8 @@ class WhatsAppBot:
                 lambda d: any(d.find_elements(By.XPATH, xp) for xp in elementos_indicadores)
             )
             self.log("Login detectado!")
+            time.sleep(2)
+            self.fechar_popups_aviso()
             return True
         except:
             self.log("Timeout aguardando login")
@@ -68,19 +82,20 @@ class WhatsAppBot:
     def buscar_grupo(self, nome_grupo):
         """Busca e entra em um grupo"""
         try:
+            self.fechar_popups_aviso()
             self.log(f"Buscando grupo: {nome_grupo}")
             
-            # 1. Tenta clicar direto se visivel
+            # 1. Tenta clicar direto se visível na lista
             try:
                 chat = self.driver.find_element(By.XPATH, f"//span[@title='{nome_grupo}']")
                 chat.click()
                 self.log(f"Grupo {nome_grupo} encontrado na lista.")
-                time.sleep(1)
+                time.sleep(1.5)
                 return True
             except:
                 pass
             
-            # 2. Usa a busca
+            # 2. Usa o campo de busca do WhatsApp
             search_box = self.driver.find_element(By.XPATH, "//input[contains(@placeholder, 'Pesquisar') or contains(@placeholder, 'nova') or contains(@placeholder, 'Search')] | //div[@id='side']//input")
             search_box.click()
             search_box.clear()
@@ -90,6 +105,7 @@ class WhatsAppBot:
             chat = self.driver.find_element(By.XPATH, f"//span[@title='{nome_grupo}']")
             chat.click()
             self.log(f"Grupo {nome_grupo} encontrado via busca.")
+            time.sleep(1.5)
             return True
             
         except Exception as e:
@@ -97,11 +113,10 @@ class WhatsAppBot:
             return False
 
     def enviar_imagem(self, image_path, legenda=""):
-        """Envia imagem usando input injection e menu"""
+        """Envia imagem copiando para o clipboard e colando com tempo de espera ampliado para a legenda"""
         try:
             self.log(f"Enviando imagem: {image_path}")
             
-            # Nova Abordagem: Copiar Imagem para Clipboard e Colar
             from core.utils import copy_image_to_clipboard
             import win32clipboard
 
@@ -109,68 +124,54 @@ class WhatsAppBot:
             if not copy_image_to_clipboard(image_path):
                 raise Exception("Falha ao copiar imagem para clipboard")
 
-            # 2. Foca no campo de texto principal
+            # 2. Foca no campo de texto principal do chat
             try:
-                # Tenta clicar no campo de mensagem para garantir foco
                 box = self.driver.find_element(By.XPATH, "//footer//div[@contenteditable='true'] | //div[@contenteditable='true'][@data-tab='10']")
                 box.click()
                 time.sleep(0.5)
             except:
-                self.log("Aviso: Não consegui focar no chat, tentando colar mesmo assim.")
+                self.log("Aviso: Tentando colar imagem diretamente no chat.")
 
             # 3. Cola a imagem (Ctrl+V)
             actions = ActionChains(self.driver)
-            actions.key_down(Keys.CONTROL)
-            actions.send_keys('v')
-            actions.key_up(Keys.CONTROL)
-            actions.perform()
+            actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+            self.log("Imagem colada (Ctrl+V). Aguardando carregamento do preview...")
             
-            self.log("Comando colar (Ctrl+V) enviado.")
-            
-            # 4. Aguarda preview da imagem (campo de legenda aparecer)
-            # Substituindo WebDriverWait por sleep fixo curto para agilidade máxima
-            # O usuário relatou lentidão, indicando que o Wait estava demorando para achar o elemento.
-            time.sleep(0.8) 
+            # 4. Tempo de espera ampliado para a imagem carregar totalmente no modal de preview
+            time.sleep(2.5) 
             
             # 5. Colar a legenda
             if legenda:
-               try:
-                   # Copia legenda para clipboard
-                   win32clipboard.OpenClipboard()
-                   win32clipboard.EmptyClipboard()
-                   win32clipboard.SetClipboardText(legenda, win32clipboard.CF_UNICODETEXT)
-                   win32clipboard.CloseClipboard()
-                   
-                   # Cola Legenda (Ctrl+V) assumindo que o foco já está correto (comportamento padrão do WhatsApp)
-                   actions = ActionChains(self.driver)
-                   actions.key_down(Keys.CONTROL)
-                   actions.send_keys('v')
-                   actions.key_up(Keys.CONTROL)
-                   actions.perform()
-                   time.sleep(0.2)
-               except Exception as e:
-                   self.log(f"Erro ao colar legenda: {e}")
-                   # Tenta digitar como último recurso
-                   try: 
-                        if caption_box:
-                            caption_box.send_keys(legenda) 
-                   except: pass
+                try:
+                    # Copia legenda para clipboard
+                    win32clipboard.OpenClipboard()
+                    win32clipboard.EmptyClipboard()
+                    win32clipboard.SetClipboardText(legenda, win32clipboard.CF_UNICODETEXT)
+                    win32clipboard.CloseClipboard()
+                    time.sleep(0.3)
+                    
+                    # Cola Legenda (Ctrl+V) no modal de preview que já está focado
+                    actions = ActionChains(self.driver)
+                    actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+                    self.log("Legenda colada (Ctrl+V).")
+                    time.sleep(1.0)
+                except Exception as e:
+                    self.log(f"Erro ao colar legenda: {e}")
 
+            # 6. Clicar no botão Enviar (ou Enter)
             try:
-                # Botão de enviar no modal de preview
                 send_btn = WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//span[@data-icon='send']"))
+                    EC.element_to_be_clickable((By.XPATH, "//span[@data-icon='send'] | //div[@aria-label='Enviar' or @aria-label='Send']"))
                 )
                 send_btn.click()
                 self.log("Botão enviar clicado.")
             except Exception as e:
-                self.log(f"Erro ao clicar envie: {e}")
-                # Fallback Enter
+                self.log(f"Erro ao clicar enviar: {e}. Tentando Enter...")
                 actions = ActionChains(self.driver)
                 actions.send_keys(Keys.ENTER).perform()
             
-            self.log("Imagem enviada.")
-            time.sleep(2)
+            self.log("Imagem e legenda enviadas com sucesso.")
+            time.sleep(2.5)
             return True
             
         except Exception as e:
@@ -178,20 +179,17 @@ class WhatsAppBot:
             return False
 
     def enviar_mensagem_texto(self, texto):
-        """Envia mensagem de texto"""
+        """Envia mensagem de texto simples"""
         try:
-            # Encontra campo de texto
-            # encontra campo de texto
             box = self.driver.find_element(By.XPATH, "//footer//div[@contenteditable='true'] | //div[@contenteditable='true'][@data-tab='10']")
             box.click()
             
-            # Envia texto com suporte a quebras de linha (Shift+Enter)
-            # Se o texto já vier com \n, podemos tentar enviar direto ou processar
             for linha in texto.split('\n'):
                 box.send_keys(linha)
                 box.send_keys(Keys.SHIFT + Keys.ENTER)
             
             box.send_keys(Keys.ENTER)
+            time.sleep(1.5)
             return True
         except Exception as e:
             self.log(f"Erro ao enviar texto: {e}")

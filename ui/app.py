@@ -69,6 +69,7 @@ def main_app(page: ft.Page):
             ft.dropdown.Option("ferramentas", "🛠️ Ferramentas & Automotivo"),
         ]
     )
+    input_gemini_key = ft.TextField(label="🔑 Google Gemini API Key (Engajamento / Mensagens Especiais)", password=True, can_reveal_password=True)
     input_grupo = ft.TextField(label="Nome do Grupo WhatsApp", value="Teste")
     input_limit = ft.TextField(label="Quantidade de Produtos (por plataforma)", value="5", keyboard_type=ft.KeyboardType.NUMBER)
 
@@ -247,7 +248,7 @@ def main_app(page: ft.Page):
                 if p.get('imagem_url'):
                     baixar_imagem(p['imagem_url'], img_path)
                 
-                # Formatar mensagem com cupom integrado
+                # Formatar mensagem com template nativo perfeito (preço e cupom estritamente validados)
                 msg = formatar_mensagem_produto(p, cupom_aplicado)
                 
                 # Enviar
@@ -375,6 +376,7 @@ def main_app(page: ft.Page):
                 "word_ml": input_word_ml.value,
                 "categoria": input_categoria.value,
                 "termo_ml": input_categoria.value,
+                "gemini_key": input_gemini_key.value,
                 "grupo": input_grupo.value,
                 "limit": input_limit.value,
                 # Scheduler Config
@@ -395,6 +397,7 @@ def main_app(page: ft.Page):
     input_tag_ml.value = current_config.get("tag_ml", "")
     input_word_ml.value = current_config.get("word_ml", "")
     input_categoria.value = current_config.get("categoria") or current_config.get("termo_ml", "ofertas")
+    input_gemini_key.value = current_config.get("gemini_key", "")
     input_grupo.value = current_config.get("grupo", "Teste")
     input_limit.value = current_config.get("limit", "5")
     
@@ -403,6 +406,9 @@ def main_app(page: ft.Page):
         ft.Text("Configurações", size=30, weight=ft.FontWeight.BOLD),
         ft.Text("🎯 Filtro de Nicho / Categoria Geral", size=18, weight=ft.FontWeight.BOLD, color="blue"),
         input_categoria,
+        ft.Divider(),
+        ft.Text("🤖 Inteligência Artificial (Google Gemini)", size=18, weight=ft.FontWeight.BOLD, color="purple"),
+        input_gemini_key,
         ft.Divider(),
         ft.Text("Shopee (API)", size=18, weight=ft.FontWeight.BOLD, color="orange"),
         input_appid,
