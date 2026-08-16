@@ -1,8 +1,46 @@
 import requests
 import os
+import re
 import win32clipboard
 from io import BytesIO
 from PIL import Image
+
+def limpar_titulo_inteligente(titulo):
+    """Higieniza o título do produto removendo palavras repetidas, spam de SEO e truncando se excessivo"""
+    if not titulo:
+        return ""
+    
+    # 1. Remove caracteres estranhos
+    t = re.sub(r'[^\w\s\-\.,!?/&]', '', str(titulo)).strip()
+    
+    # 2. Remove repetições consecutivas de frases e palavras
+    for _ in range(4):
+        t = re.sub(r'\b(\w+(?:\s+\w+){0,4})\s+\1\b', r'\1', t, flags=re.IGNORECASE)
+    
+    # 3. Remove palavras spam duplicadas não consecutivas
+    palavras = t.split()
+    palavras_limpas = []
+    vistos = {}
+    stopwords = {"de", "do", "da", "em", "para", "com", "e", "ou", "a", "o", "as", "os", "um", "uma", "no", "na"}
+    
+    for p in palavras:
+        p_clean = re.sub(r'[^\w]', '', p.lower())
+        if not p_clean:
+            continue
+        if p_clean not in stopwords:
+            if vistos.get(p_clean, 0) >= 1:
+                continue
+            vistos[p_clean] = vistos.get(p_clean, 0) + 1
+        palavras_limpas.append(p)
+        
+    resultado = " ".join(palavras_limpas).strip()
+    
+    # Se ficar muito longo (acima de 120 caracteres), corta no último espaço
+    if len(resultado) > 130:
+        corte = resultado[:125].rsplit(' ', 1)[0]
+        resultado = corte + "..."
+        
+    return resultado
 
 def baixar_imagem(url, caminho_arquivo):
     """Baixa imagem de uma URL para um arquivo local"""
@@ -46,7 +84,7 @@ def formatar_mensagem_produto(produto, cupom=None):
     - Preço promocional (Por: *R$ ...* (XX% OFF))
     - Destaque claro de cupom digitável ou aplicado
     """
-    titulo = produto.get("titulo", "")
+    titulo = limpar_titulo_inteligente(produto.get("titulo", ""))
     fonte = produto.get("fonte", "Oferta")
     preco_atual = produto.get("preco", "0.00")
     preco_orig = produto.get("preco_original", "")

@@ -53,8 +53,9 @@ def processar_oferta_individual(oferta, indice):
         except:
             rating = 4.5
         
-        # Limpa nome (SEM CORTAR)
-        nome_limpo = re.sub(r'[^\w\s\-\.,!?]', '', str(nome))
+        # Limpa nome com higienização inteligente anti-spam
+        from core.utils import limpar_titulo_inteligente
+        nome_limpo = limpar_titulo_inteligente(nome)
         
         return {
             "titulo": nome_limpo,
@@ -72,30 +73,39 @@ def processar_oferta_individual(oferta, indice):
         print(f"   ⚠️ Erro no produto {indice}: {str(e)[:80]}")
         return None
 
-def buscar_ofertas_shopee_reais(appid, secret, limit=5, ignore_list=None, log_func=print):
-    """Busca ofertas reais da API Shopee paginando até atingir o limite de produtos únicos"""
+def buscar_ofertas_shopee_reais(appid, secret, termo="", limit=5, ignore_list=None, log_func=print):
+    """Busca ofertas reais da API Shopee filtradas por termo/categoria paginando até atingir o limite de produtos únicos"""
     produtos = []
     
     if not appid or not secret or len(secret) != 32:
         log_func("⚠️ Credenciais inválidas")
         return produtos
         
+    from database.db import normalizar_titulo_dedup
+    
     if ignore_list is None:
-        ignore_list = set()
+        ignore_set = set()
     else:
-        ignore_list = set(ignore_list)
+        ignore_set = set(ignore_list)
         
     page = 1
     max_pages = 10  # Limite de segurança para não entrar em loop infinito
     
+    termo_limpo = (termo or "").strip()
+    if termo_limpo.lower() in ["ofertas", "todos", "geral", ""]:
+        filtro_keyword = ""
+        log_func(f"🛍️ Buscando ofertas nacionais Shopee (Meta: {limit}, ignorando {len(ignore_set)} enviados)...")
+    else:
+        filtro_keyword = f', keyword: "{termo_limpo}"'
+        log_func(f"🛍️ Buscando ofertas nacionais Shopee no nicho '{termo_limpo}' (Meta: {limit}, ignorando {len(ignore_set)} enviados)...")
+    
     try:
-        log_func(f"🛍️ Buscando ofertas Shopee (Meta: {limit}, ignorando {len(ignore_list)} enviados)...")
-        
         while len(produtos) < limit and page <= max_pages:
             log_func(f"📡 Buscando página {page} na API Shopee...")
             
+            # sortType: 2 (Mais Vendidos / Melhores Vendedores) garante produtos de alta demanda e qualidade
             query = f"""{{
-  productOfferV2(limit: 20, page: {page}, sortType: 1) {{
+  productOfferV2(limit: 30, page: {page}, sortType: 2{filtro_keyword}) {{
     nodes {{
       productName
       price
@@ -103,6 +113,8 @@ def buscar_ofertas_shopee_reais(appid, secret, limit=5, ignore_list=None, log_fu
       priceMax
       priceDiscountRate
       ratingStar
+      sales
+      shopType
       offerLink
       imageUrl
     }}
@@ -144,20 +156,38 @@ def buscar_ofertas_shopee_reais(appid, secret, limit=5, ignore_list=None, log_fu
             
             novos_adicionados = 0
             for i, oferta in enumerate(ofertas):
+                img_url = str(oferta.get("imageUrl") or "")
+                
+                # 1. Filtro estrito: Apenas compras no Brasil (descarta armazéns internacionais como sg-, my-, ph-, th-, cn-)
+                is_internacional = any(pfx in img_url for pfx in ["sg-", "my-", "ph-", "th-", "cn-", "id-", "vn-"])
+                if is_internacional:
+                    continue
+                
+                # 2. Filtro estrito: Apenas produtos com boa avaliação (mínimo 4.4 estrelas se avaliado)
+                try:
+                    rating_val = float(oferta.get("ratingStar") or 0)
+                    if rating_val > 0 and rating_val < 4.4:
+                        continue
+                except:
+                    pass
+                
                 produto_processado = processar_oferta_individual(oferta, len(produtos) + 1)
                 if produto_processado:
                     titulo = produto_processado["titulo"]
-                    if titulo in ignore_list:
+                    titulo_norm = normalizar_titulo_dedup(titulo)
+                    
+                    if titulo in ignore_set or titulo_norm in ignore_set:
                         continue
                     
                     produtos.append(produto_processado)
-                    ignore_list.add(titulo) # Evita duplicados dentro da mesma busca
+                    ignore_set.add(titulo) # Evita duplicados dentro da mesma busca
+                    ignore_set.add(titulo_norm)
                     novos_adicionados += 1
                     
                     if len(produtos) >= limit:
                         break
             
-            log_func(f"📊 Adicionados {novos_adicionados} novos produtos nesta página. Total acumulado: {len(produtos)}/{limit}")
+            log_func(f"📊 Adicionados {novos_adicionados} produtos nacionais qualificados nesta página. Total acumulado: {len(produtos)}/{limit}")
             page += 1
             time.sleep(1) # Intervalo respeitoso entre requisições
             
@@ -167,6 +197,8 @@ def buscar_ofertas_shopee_reais(appid, secret, limit=5, ignore_list=None, log_fu
         log_func(f"❌ Erro geral na API: {str(e)[:100]}")
     
     return produtos[:limit]
+
+
 
 def mapear_categoria_shopee(nome_oferta):
     """Mapeia nomes de ofertas da Shopee para tags semânticas em português"""

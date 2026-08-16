@@ -34,18 +34,72 @@ def encurtar_link_ml(url):
     return clean_url.split('?')[0]
 
 
+MAPA_CATEGORIAS_ML = {
+    "moda": "MLB1430",
+    "roupa": "MLB1430",
+    "roupas": "MLB1430",
+    "calcado": "MLB1430",
+    "calcados": "MLB1430",
+    "tenis": "MLB1430",
+    "vestido": "MLB1430",
+    "eletronico": "MLB1000",
+    "eletronicos": "MLB1000",
+    "tecnologia": "MLB1000",
+    "tv": "MLB1000",
+    "celular": "MLB1051",
+    "celulares": "MLB1051",
+    "smartphone": "MLB1051",
+    "informatica": "MLB1648",
+    "notebook": "MLB1648",
+    "computador": "MLB1648",
+    "casa": "MLB1574",
+    "moveis": "MLB1574",
+    "decoracao": "MLB1574",
+    "cozinha": "MLB5726",
+    "eletrodomesticos": "MLB5726",
+    "eletro": "MLB5726",
+    "beleza": "MLB1246",
+    "perfume": "MLB1246",
+    "perfumes": "MLB1246",
+    "maquiagem": "MLB1246",
+    "esporte": "MLB1276",
+    "esportes": "MLB1276",
+    "fitness": "MLB1276",
+    "suplemento": "MLB1276",
+    "suplementos": "MLB1276",
+    "games": "MLB1144",
+    "gamer": "MLB1144",
+    "ferramentas": "MLB1499",
+    "automotivo": "MLB1499"
+}
+
+def resolver_url_ofertas_ml(termo):
+    """Mapeia o termo de busca para a URL oficial de ofertas por categoria do Mercado Livre"""
+    if not termo or termo.strip().lower() in ["ofertas", "todos", "geral", ""]:
+        return "https://www.mercadolivre.com.br/ofertas", "Geral"
+        
+    termo_norm = re.sub(r'[^\w\s]', '', termo.strip().lower())
+    for kw, cat_id in MAPA_CATEGORIAS_ML.items():
+        if kw in termo_norm:
+            return f"https://www.mercadolivre.com.br/ofertas?category={cat_id}", kw.capitalize()
+            
+    return f"https://www.mercadolivre.com.br/ofertas?q={urllib.parse.quote(termo.strip())}", termo.strip()
+
+
 def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", matt_word="", limit=5, ignore_list=None, log_func=print):
     """
-    Busca ofertas reais da página oficial de ofertas do Mercado Livre Brasil.
+    Busca ofertas reais da página oficial de ofertas do Mercado Livre Brasil com filtro por nicho.
     Retorna uma lista de dicionários padronizada com o atributo "fonte": "Mercado Livre".
     Anexa os parâmetros de rastreamento matt_tool e matt_word do programa de afiliados/criadores ML em URLs curtas.
     """
+    import random
+    from database.db import normalizar_titulo_dedup
     produtos = []
     
     if ignore_list is None:
-        ignore_list = set()
+        ignore_set = set()
     else:
-        ignore_list = set(ignore_list)
+        ignore_set = set(ignore_list)
 
     def safe_log(msg):
         try:
@@ -58,12 +112,8 @@ def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", matt_word="", limi
                 pass
 
     try:
-        if termo and termo.strip() and termo.strip().lower() != "ofertas":
-            url = f"https://www.mercadolivre.com.br/ofertas?q={urllib.parse.quote(termo.strip())}"
-        else:
-            url = "https://www.mercadolivre.com.br/ofertas"
-
-        safe_log(f"[Mercado Livre] Buscando ofertas (Termo: '{termo}', Meta: {limit})...")
+        base_url, nicho_nome = resolver_url_ofertas_ml(termo)
+        safe_log(f"[Mercado Livre] Buscando ofertas no nicho '{nicho_nome}' (Meta: {limit}, ignorando {len(ignore_set)} enviados)...")
         
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -71,135 +121,155 @@ def buscar_ofertas_ml_reais(termo="ofertas", tag_afiliado="", matt_word="", limi
             "Accept-Language": "pt-BR,pt;q=0.9",
         }
         
-        response = requests.get(url, headers=headers, timeout=15, verify=False)
-        if response.status_code != 200:
-            safe_log(f"[Mercado Livre] Status HTTP {response.status_code} na busca de ofertas.")
-            return produtos
+        from core.utils import limpar_titulo_inteligente
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        items = soup.select(".promotion-item, .poly-card, .ui-search-result, li.ui-search-layout__item")
-        safe_log(f"[Mercado Livre] Encontrados {len(items)} itens em destaque.")
+        candidatos = []
+        vistos_na_busca = set()
+        page = 1
+        max_pages = 15  # Varre até 15 páginas para nunca faltar produtos
 
-        for item in items:
-            if len(produtos) >= limit:
+        while len(candidatos) < (limit * 2) and page <= max_pages:
+            sep = "&" if "?" in base_url else "?"
+            page_url = f"{base_url}{sep}page={page}" if page > 1 else base_url
+            
+            try:
+                response = requests.get(page_url, headers=headers, timeout=15, verify=False)
+                if response.status_code != 200:
+                    break
+
+                soup = BeautifulSoup(response.text, "html.parser")
+                items = soup.select(".promotion-item, .poly-card, .ui-search-result, li.ui-search-layout__item")
+                if not items:
+                    break
+
+                for item in items:
+                    # Extrai título
+                    title_el = item.select_one(".promotion-item__title, .poly-component__title, p.poly-box, a.poly-component__title")
+                    titulo_raw = title_el.get_text(strip=True) if title_el else ""
+                    
+                    if not titulo_raw:
+                        img_el = item.select_one("img")
+                        if img_el and img_el.get("alt"):
+                            titulo_raw = img_el.get("alt")
+
+                    if not titulo_raw:
+                        continue
+
+                    # Higieniza o título com algoritmo anti-spam
+                    titulo_limpo = limpar_titulo_inteligente(titulo_raw)
+                    titulo_norm = normalizar_titulo_dedup(titulo_limpo)
+                    
+                    # Verifica rigorosamente se já foi enviado ou visto
+                    if titulo_limpo in ignore_set or titulo_raw in ignore_set or titulo_norm in ignore_set or titulo_norm in vistos_na_busca:
+                        continue
+                    vistos_na_busca.add(titulo_norm)
+
+                    # 1. Extrai Preço Anterior (De:) se houver
+                    prev_box = item.select_one('.poly-price__labels s, s.andes-money-amount--previous, .promotion-item__old-price')
+                    preco_original_str = ""
+                    if prev_box:
+                        frac = prev_box.select_one('.andes-money-amount__fraction')
+                        cents = prev_box.select_one('.andes-money-amount__cents')
+                        if frac:
+                            f_txt = re.sub(r'[^\d]', '', frac.get_text(strip=True))
+                            c_txt = re.sub(r'[^\d]', '', cents.get_text(strip=True)) if cents else "00"
+                            try:
+                                preco_orig_num = float(f"{f_txt}.{c_txt}")
+                                preco_original_str = f"{preco_orig_num:.2f}"
+                            except:
+                                preco_original_str = ""
+
+                    # 2. Extrai Preço Atual Promocional (Por:)
+                    curr_box = item.select_one('.poly-price__current, .promotion-item__price')
+                    preco_atual_num = 0.0
+                    if curr_box:
+                        frac = curr_box.select_one('.andes-money-amount__fraction')
+                        cents = curr_box.select_one('.andes-money-amount__cents')
+                        if frac:
+                            f_txt = re.sub(r'[^\d]', '', frac.get_text(strip=True))
+                            c_txt = re.sub(r'[^\d]', '', cents.get_text(strip=True)) if cents else "00"
+                            try:
+                                preco_atual_num = float(f"{f_txt}.{c_txt}")
+                            except:
+                                preco_atual_num = 0.0
+                    else:
+                        price_el = item.select_one(".andes-money-amount__fraction")
+                        if price_el:
+                            try:
+                                preco_atual_num = float(re.sub(r'[^\d]', '', price_el.get_text(strip=True)))
+                            except:
+                                preco_atual_num = 0.0
+
+                    # 3. Extrai Desconto Percentual (% OFF)
+                    disc_el = item.select_one('.poly-price__discount-polylabel, .polylabel-pill, .andes-money-amount__discount, .promotion-item__discount')
+                    desconto_txt = disc_el.get_text(strip=True) if disc_el else ""
+
+                    # Extrai e Encurta o Link
+                    link_el = item.select_one("a.promotion-item__link-container, a.poly-component__title, a")
+                    permalink = link_el["href"] if link_el and link_el.has_attr("href") else ""
+                    if not permalink:
+                        continue
+                        
+                    permalink_curto = encurtar_link_ml(permalink)
+
+                    # Anexa Parâmetros de Afiliado (matt_tool e matt_word)
+                    link_afiliado = permalink_curto
+                    tracking_params = []
+                    
+                    if tag_afiliado and str(tag_afiliado).strip():
+                        tracking_params.append(f"matt_tool={str(tag_afiliado).strip()}")
+                    if matt_word and str(matt_word).strip():
+                        tracking_params.append(f"matt_word={str(matt_word).strip()}")
+                        
+                    if tracking_params:
+                        sep_param = "&" if "?" in link_afiliado else "?"
+                        link_afiliado += f"{sep_param}" + "&".join(tracking_params)
+
+                    # Extrai Imagem em alta resolução
+                    img_el = item.select_one("img")
+                    imagem_url = ""
+                    if img_el:
+                        imagem_url = img_el.get("data-src") or img_el.get("src") or ""
+                        if imagem_url and "-I.jpg" in imagem_url:
+                            imagem_url = imagem_url.replace("-I.jpg", "-O.jpg")
+                        if imagem_url and not imagem_url.startswith("http"):
+                            imagem_url = "https:" + imagem_url
+
+                    # Extrai tag de Cupom no Card do Mercado Livre se houver
+                    coupon_el = item.select_one(".poly-component__coupons, .poly-coupons__wrapper, .poly-coupons__pill, [class*='coupon']")
+                    cupom_tag = coupon_el.get_text(strip=True) if coupon_el else ""
+
+                    candidatos.append({
+                        "titulo": titulo_limpo,
+                        "preco": f"{preco_atual_num:.2f}",
+                        "preco_original": preco_original_str,
+                        "desconto_pct": desconto_txt,
+                        "avaliacao": "4.8",
+                        "link": link_afiliado,
+                        "afiliado": link_afiliado,
+                        "fonte": "Mercado Livre",
+                        "imagem_url": imagem_url,
+                        "cupom_tag": cupom_tag
+                    })
+
+                page += 1
+            except Exception as page_err:
+                safe_log(f"[Mercado Livre] Aviso na página {page}: {page_err}")
                 break
-                
-            # Extrai título
-            title_el = item.select_one(".promotion-item__title, .poly-component__title, p.poly-box, a.poly-component__title")
-            titulo_raw = title_el.get_text(strip=True) if title_el else ""
-            
-            if not titulo_raw:
-                img_el = item.select_one("img")
-                if img_el and img_el.get("alt"):
-                    titulo_raw = img_el.get("alt")
 
-            if not titulo_raw:
-                continue
+        # Se temos mais candidatos do que o limite, embaralha para variar a cada envio
+        if len(candidatos) > limit:
+            random.shuffle(candidatos)
+        produtos = candidatos[:limit]
 
-            # Limpa o título
-            titulo_limpo = re.sub(r'[^\w\s\-\.,!?]', '', str(titulo_raw)).strip()
-            
-            # Verifica se já foi enviado
-            if titulo_limpo in ignore_list or titulo_raw in ignore_list:
-                continue
-
-            # 1. Extrai Preço Anterior (De:) se houver
-            prev_box = item.select_one('.poly-price__labels s, s.andes-money-amount--previous, .promotion-item__old-price')
-            preco_original_str = ""
-            if prev_box:
-                frac = prev_box.select_one('.andes-money-amount__fraction')
-                cents = prev_box.select_one('.andes-money-amount__cents')
-                if frac:
-                    f_txt = re.sub(r'[^\d]', '', frac.get_text(strip=True))
-                    c_txt = re.sub(r'[^\d]', '', cents.get_text(strip=True)) if cents else "00"
-                    try:
-                        preco_orig_num = float(f"{f_txt}.{c_txt}")
-                        preco_original_str = f"{preco_orig_num:.2f}"
-                    except:
-                        preco_original_str = ""
-
-            # 2. Extrai Preço Atual Promocional (Por:)
-            curr_box = item.select_one('.poly-price__current, .promotion-item__price')
-            preco_atual_num = 0.0
-            if curr_box:
-                frac = curr_box.select_one('.andes-money-amount__fraction')
-                cents = curr_box.select_one('.andes-money-amount__cents')
-                if frac:
-                    f_txt = re.sub(r'[^\d]', '', frac.get_text(strip=True))
-                    c_txt = re.sub(r'[^\d]', '', cents.get_text(strip=True)) if cents else "00"
-                    try:
-                        preco_atual_num = float(f"{f_txt}.{c_txt}")
-                    except:
-                        preco_atual_num = 0.0
-            else:
-                # Fallback se a estrutura for diferente
-                price_el = item.select_one(".andes-money-amount__fraction")
-                if price_el:
-                    try:
-                        preco_atual_num = float(re.sub(r'[^\d]', '', price_el.get_text(strip=True)))
-                    except:
-                        preco_atual_num = 0.0
-
-            # 3. Extrai Desconto Percentual (% OFF)
-            disc_el = item.select_one('.poly-price__discount-polylabel, .polylabel-pill, .andes-money-amount__discount, .promotion-item__discount')
-            desconto_txt = disc_el.get_text(strip=True) if disc_el else ""
-
-            # Extrai e Encurta o Link
-            link_el = item.select_one("a.promotion-item__link-container, a.poly-component__title, a")
-            permalink = link_el["href"] if link_el and link_el.has_attr("href") else ""
-            if not permalink:
-                continue
-                
-            # Encurta a URL base do produto
-            permalink_curto = encurtar_link_ml(permalink)
-
-            # Anexa Parâmetros de Afiliado (matt_tool e matt_word)
-            link_afiliado = permalink_curto
-            tracking_params = []
-            
-            if tag_afiliado and str(tag_afiliado).strip():
-                tracking_params.append(f"matt_tool={str(tag_afiliado).strip()}")
-            if matt_word and str(matt_word).strip():
-                tracking_params.append(f"matt_word={str(matt_word).strip()}")
-                
-            if tracking_params:
-                sep = "&" if "?" in link_afiliado else "?"
-                link_afiliado += f"{sep}" + "&".join(tracking_params)
-
-            # Extrai Imagem em alta resolução
-            img_el = item.select_one("img")
-            imagem_url = ""
-            if img_el:
-                imagem_url = img_el.get("data-src") or img_el.get("src") or ""
-                if imagem_url and "-I.jpg" in imagem_url:
-                    imagem_url = imagem_url.replace("-I.jpg", "-O.jpg")
-                if imagem_url and not imagem_url.startswith("http"):
-                    imagem_url = "https:" + imagem_url
-
-            # Extrai tag de Cupom no Card do Mercado Livre se houver
-            coupon_el = item.select_one(".poly-component__coupons, .poly-coupons__wrapper, .poly-coupons__pill, [class*='coupon']")
-            cupom_tag = coupon_el.get_text(strip=True) if coupon_el else ""
-
-            produtos.append({
-                "titulo": titulo_limpo,
-                "preco": f"{preco_atual_num:.2f}",
-                "preco_original": preco_original_str,
-                "desconto_pct": desconto_txt,
-                "avaliacao": "4.8",
-                "link": link_afiliado,
-                "afiliado": link_afiliado,
-                "fonte": "Mercado Livre",
-                "imagem_url": imagem_url,
-                "cupom_tag": cupom_tag
-            })
-
-        safe_log(f"[Mercado Livre] Sucesso: {len(produtos)} produtos válidos extraídos.")
+        safe_log(f"[Mercado Livre] Sucesso: {len(produtos)} produtos válidos selecionados ({len(candidatos)} novos encontrados em {page-1} páginas).")
 
     except Exception as e:
         safe_log(f"[Mercado Livre] Erro ao buscar ofertas: {e}")
 
-
     return produtos
+
+
 
 
 def mapear_categoria_ml(texto_cupom):

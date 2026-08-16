@@ -54,7 +54,21 @@ def main_app(page: ft.Page):
     input_secret = ft.TextField(label="Shopee Secret Key", password=True, can_reveal_password=True)
     input_tag_ml = ft.TextField(label="ML matt_tool (ex: 38835395)")
     input_word_ml = ft.TextField(label="ML matt_word / Perfil (ex: joicemagalhes)")
-    input_termo_ml = ft.TextField(label="Termo de Busca Mercado Livre", value="ofertas")
+    input_categoria = ft.Dropdown(
+        label="🎯 Nicho / Categoria de Busca (Shopee + ML)",
+        value="ofertas",
+        options=[
+            ft.dropdown.Option("ofertas", "🔥 Ofertas Gerais (Todas as Categorias)"),
+            ft.dropdown.Option("moda", "👗 Moda, Roupas & Calçados"),
+            ft.dropdown.Option("celular", "📱 Celulares & Smartphones"),
+            ft.dropdown.Option("tecnologia", "💻 Tecnologia, Informática & TVs"),
+            ft.dropdown.Option("casa", "🏠 Casa, Decoração & Cozinha"),
+            ft.dropdown.Option("beleza", "💄 Beleza, Perfumes & Cuidados"),
+            ft.dropdown.Option("games", "⚡ Games & Consoles"),
+            ft.dropdown.Option("esporte", "⚽ Esportes, Fitness & Suplementos"),
+            ft.dropdown.Option("ferramentas", "🛠️ Ferramentas & Automotivo"),
+        ]
+    )
     input_grupo = ft.TextField(label="Nome do Grupo WhatsApp", value="Teste")
     input_limit = ft.TextField(label="Quantidade de Produtos (por plataforma)", value="5", keyboard_type=ft.KeyboardType.NUMBER)
 
@@ -136,7 +150,7 @@ def main_app(page: ft.Page):
         grupo = input_grupo.value
         tag_ml = input_tag_ml.value
         word_ml = input_word_ml.value
-        termo_ml = input_termo_ml.value
+        categoria = input_categoria.value
         try:
             limit = int(input_limit.value)
         except:
@@ -168,16 +182,16 @@ def main_app(page: ft.Page):
             produtos_shopee = []
             produtos_ml = []
 
-            # 1. Busca ofertas da Shopee (se credenciais preenchidas)
+            # 1. Busca ofertas da Shopee filtradas pelo nicho (se credenciais preenchidas)
             if appid and secret:
-                add_log("Buscando ofertas na Shopee...")
-                produtos_shopee = buscar_ofertas_shopee_reais(appid, secret, limit=limit, ignore_list=enviados, log_func=add_log)
+                add_log(f"Buscando ofertas na Shopee (Nicho: '{categoria}')...")
+                produtos_shopee = buscar_ofertas_shopee_reais(appid, secret, termo=categoria, limit=limit, ignore_list=enviados, log_func=add_log)
             else:
                 add_log("Credenciais Shopee não fornecidas. Pulando busca Shopee...")
 
-            # 2. Busca ofertas do Mercado Livre
-            add_log(f"Buscando ofertas no Mercado Livre (Termo: '{termo_ml}')...")
-            produtos_ml = buscar_ofertas_ml_reais(termo=termo_ml, tag_afiliado=tag_ml, matt_word=word_ml, limit=limit, ignore_list=enviados, log_func=add_log)
+            # 2. Busca ofertas do Mercado Livre filtradas pelo nicho
+            add_log(f"Buscando ofertas no Mercado Livre (Nicho: '{categoria}')...")
+            produtos_ml = buscar_ofertas_ml_reais(termo=categoria, tag_afiliado=tag_ml, matt_word=word_ml, limit=limit, ignore_list=enviados, log_func=add_log)
 
             # 3. Combina e embaralha produtos aleatoriamente
             produtos = produtos_shopee + produtos_ml
@@ -338,8 +352,10 @@ def main_app(page: ft.Page):
 
 
     import json
+    from database.db import get_db_path
 
-    CONFIG_FILE = "config.json"
+    # Usa o mesmo diretório permanente do banco de dados para o config.json
+    CONFIG_FILE = os.path.join(os.path.dirname(get_db_path()), "config.json")
 
     def load_config():
         if os.path.exists(CONFIG_FILE):
@@ -357,7 +373,8 @@ def main_app(page: ft.Page):
                 "secret": input_secret.value,
                 "tag_ml": input_tag_ml.value,
                 "word_ml": input_word_ml.value,
-                "termo_ml": input_termo_ml.value,
+                "categoria": input_categoria.value,
+                "termo_ml": input_categoria.value,
                 "grupo": input_grupo.value,
                 "limit": input_limit.value,
                 # Scheduler Config
@@ -377,19 +394,21 @@ def main_app(page: ft.Page):
     input_secret.value = current_config.get("secret", "")
     input_tag_ml.value = current_config.get("tag_ml", "")
     input_word_ml.value = current_config.get("word_ml", "")
-    input_termo_ml.value = current_config.get("termo_ml", "ofertas")
+    input_categoria.value = current_config.get("categoria") or current_config.get("termo_ml", "ofertas")
     input_grupo.value = current_config.get("grupo", "Teste")
     input_limit.value = current_config.get("limit", "5")
     
     # Config Tab
     config_content = ft.Column([
         ft.Text("Configurações", size=30, weight=ft.FontWeight.BOLD),
+        ft.Text("🎯 Filtro de Nicho / Categoria Geral", size=18, weight=ft.FontWeight.BOLD, color="blue"),
+        input_categoria,
+        ft.Divider(),
         ft.Text("Shopee (API)", size=18, weight=ft.FontWeight.BOLD, color="orange"),
         input_appid,
         input_secret,
         ft.Divider(),
-        ft.Text("Mercado Livre", size=18, weight=ft.FontWeight.BOLD, color="yellow"),
-        input_termo_ml,
+        ft.Text("Mercado Livre (Afiliados)", size=18, weight=ft.FontWeight.BOLD, color="yellow"),
         input_tag_ml,
         input_word_ml,
         ft.Divider(),
