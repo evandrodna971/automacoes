@@ -179,17 +179,57 @@ class WhatsAppBot:
             return False
 
     def enviar_mensagem_texto(self, texto):
-        """Envia mensagem de texto simples"""
+        """Envia mensagem de texto via clipboard e Ctrl+V com tempos seguros e clique no botão de envio"""
         try:
-            box = self.driver.find_element(By.XPATH, "//footer//div[@contenteditable='true'] | //div[@contenteditable='true'][@data-tab='10']")
+            if not texto or not texto.strip():
+                return False
+                
+            self.fechar_popups_aviso()
+            self.log("Preparando envio de mensagem de texto...")
+            
+            import win32clipboard
+
+            # 1. Copia texto completo para o clipboard
+            try:
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(texto.strip(), win32clipboard.CF_UNICODETEXT)
+                win32clipboard.CloseClipboard()
+            except Exception as clip_err:
+                self.log(f"Aviso no clipboard de texto: {clip_err}")
+                
+            time.sleep(0.3)
+
+            # 2. Localiza e foca no campo de mensagem do chat
+            box = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//footer//div[@contenteditable='true'] | //div[@contenteditable='true'][@data-tab='10']"))
+            )
             box.click()
+            time.sleep(0.5)
+
+            # 3. Cola o texto completo instantaneamente (Ctrl+V)
+            actions = ActionChains(self.driver)
+            actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+            self.log("Texto colado no campo de mensagem (Ctrl+V).")
             
-            for linha in texto.split('\n'):
-                box.send_keys(linha)
-                box.send_keys(Keys.SHIFT + Keys.ENTER)
-            
-            box.send_keys(Keys.ENTER)
+            # 4. Aguarda tempo seguro para o WhatsApp processar o texto e liberar o botão de envio
             time.sleep(1.5)
+
+            # 5. Clica no botão de envio
+            try:
+                send_btn = WebDriverWait(self.driver, 6).until(
+                    EC.element_to_be_clickable((By.XPATH, "//span[@data-icon='send'] | //div[@aria-label='Enviar' or @aria-label='Send'] | //button[contains(@aria-label, 'Enviar')]"))
+                )
+                send_btn.click()
+                self.log("Botão de envio clicado com sucesso.")
+            except Exception as ex_btn:
+                self.log(f"Botão não clicável, enviando ENTER: {ex_btn}")
+                actions = ActionChains(self.driver)
+                actions.send_keys(Keys.ENTER).perform()
+
+            # 6. Tempo de espera seguro pós-envio para garantir que o WhatsApp transmita a mensagem antes de fechar o driver
+            time.sleep(3.0)
+            self.log("Mensagem de texto enviada e transmitida com sucesso!")
             return True
         except Exception as e:
             self.log(f"Erro ao enviar texto: {e}")

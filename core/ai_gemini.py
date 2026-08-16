@@ -89,9 +89,120 @@ Use apenas formatação de WhatsApp (*negrito*, ~riscado~). Retorne a mensagem C
             return formatar_mensagem_produto(produto, cupom)
 
     @classmethod
+    def gerar_versiculo_biblico_inedito(cls, ja_usados=None, api_key="", log_func=print):
+        """
+        Gera um versículo bíblico com reflexão 100% inédito, proibindo os versículos já enviados recentemente.
+        """
+        import random
+        import datetime
+        
+        api_key_clean = (api_key or "").strip()
+        if not api_key_clean:
+            return None
+
+        livros_sugeridos = [
+            "Provérbios", "Salmos", "Isaías", "Jeremias", "Mateus", "Lucas", "João", 
+            "Romanos", "1 Coríntios", "2 Coríntios", "Gálatas", "Efésios", "Filipenses", 
+            "Colossenses", "1 Tessalonicenses", "Josué", "Tiago", "1 Pedro", "Hebreus", "Eclesiastes"
+        ]
+        temas_sugeridos = [
+            "Paz e Esperança", "Sabedoria nas Decisões", "Força e Vitória", "Gratidão e Família",
+            "Trabalho e Prosperidade", "Paciência e Confiança", "Recomeço e Fé", "Alegria e Superação"
+        ]
+        
+        livro_foco = random.choice(livros_sugeridos)
+        tema_foco = random.choice(temas_sugeridos)
+        
+        lista_bloqueados = ""
+        if ja_usados:
+            lista_bloqueados = "\n".join([f"- {u}" for u in ja_usados[:25]])
+        else:
+            lista_bloqueados = "- (Nenhum registro anterior)"
+
+        prompt = f"""Você é o administrador de um grupo VIP de ofertas e achadinhos no WhatsApp no Brasil.
+Seu objetivo é gerar a Mensagem do Versículo Bíblico do Dia para abençoar e acolher os membros.
+
+DIRETRIZES DESTA GERAÇÃO:
+- Foco temático de hoje: {tema_foco}
+- Livro bíblico sugerido: {livro_foco}
+
+⛔ VERSÍCULOS / REFERÊNCIAS JÁ UTILIZADOS RECENTEMENTE (PROIBIDO REPETIR QUALQUER UM DESTES):
+{lista_bloqueados}
+
+REGRAS ESTRITAS:
+1. Escolha um versículo DIFERENTE e INÉDITO, que NÃO esteja na lista acima.
+2. Inicie com um cabeçalho bonito (ex: 📖 *PALAVRA DO DIA* ou 🌟 *VERSÍCULO DO DIA*).
+3. Coloque o versículo bíblico completo entre aspas em _itálico_ com a referência bíblica destacada em *negrito* (ex: *Isaías 40:31*).
+4. Escreva uma reflexão calorosa, motivadora e acolhedora de 2 parágrafos curtos, desejando um dia de paz, vitórias e boas conquistas para todos os membros do grupo.
+5. Use formatação nativa do WhatsApp (*negrito*, _itálico_) e emojis acolhedores bem distribuídos.
+6. Retorne APENAS o texto pronto para envio no WhatsApp, sem introduções ou comentários.
+"""
+        try:
+            resp = cls._chamar_gemini_api(prompt, api_key_clean)
+            if resp and len(resp.strip()) > 30:
+                return resp.strip()
+        except Exception as e:
+            log_func(f"⚠️ Erro ao gerar versículo inédito: {e}")
+        return None
+
+    @classmethod
+    def gerar_dica_economia_inedita(cls, ja_usados=None, api_key="", log_func=print):
+        """
+        Gera uma dica de economia e compras inteligentes 100% inédita, proibindo dicas já dadas.
+        """
+        import random
+        api_key_clean = (api_key or "").strip()
+        if not api_key_clean:
+            return None
+
+        topicos_dica = [
+            "Cashback e carteiras digitais que devolvem dinheiro de verdade",
+            "Alertas de queda de preço e históricos para não cair em falsas promoções",
+            "Estratégia de acumular cupons de loja com cupons de frete grátis da plataforma",
+            "Comparação do preço por grama / ml / unidade em produtos de mercado e higiene",
+            "Dicas de segurança para verificar reputação de vendedores e fotos reais nos comentários",
+            "Como funciona a garantia estendida e o direito de devolução grátis em 7 dias",
+            "Criar lista de desejos e monitorar horários de virada de ofertas relâmpago (00:00, 12:00)",
+            "Vantagens de pagamentos instantâneos (Pix) que concedem descontos adicionais",
+            "Como evitar compras por impulso usando a regra dos 2 dias de reflexão",
+            "Aproveitar combos 'Leve Mais por Menos' e cupons progressivos com sabedoria"
+        ]
+        
+        topico_foco = random.choice(topicos_dica)
+        lista_bloqueados = ""
+        if ja_usados:
+            lista_bloqueados = "\n".join([f"- {u}" for u in ja_usados[:25]])
+        else:
+            lista_bloqueados = "- (Nenhum registro anterior)"
+
+        prompt = f"""Você é o administrador de um grupo VIP de ofertas e achadinhos no WhatsApp no Brasil.
+Seu objetivo é gerar a Dica de Economia & Compras Inteligentes do Dia para ajudar os membros a economizarem de verdade.
+
+DIRETRIZES DESTA GERAÇÃO:
+- Tópico sugerido de hoje: {topico_foco}
+
+⛔ DICAS JÁ DADAS RECENTEMENTE (PROIBIDO REPETIR O MESMO TEMA/ASSUNTO):
+{lista_bloqueados}
+
+REGRAS ESTRITAS:
+1. Crie uma dica NOVA, PRÁTICA e CRIATIVA sobre o tópico sugerido.
+2. Inicie com um título atraente (ex: 💡 *DICA DE ECONOMIA DO ADM* ou 🎯 *SEGREDO PARA COMPRAR MAIS BARATO*).
+3. Explique em 2 ou 3 passos simples como aplicar a dica na prática (na Shopee, Mercado Livre ou compras online em geral).
+4. Tom amigável, parceiro e experiente, com emojis bem distribuídos e formatação do WhatsApp (*negrito*, _itálico_).
+5. Retorne APENAS o texto pronto para envio no WhatsApp.
+"""
+        try:
+            resp = cls._chamar_gemini_api(prompt, api_key_clean)
+            if resp and len(resp.strip()) > 30:
+                return resp.strip()
+        except Exception as e:
+            log_func(f"⚠️ Erro ao gerar dica inédita: {e}")
+        return None
+
+    @classmethod
     def gerar_mensagem_engajamento(cls, tema_ou_prompt, api_key="", log_func=print):
         """
-        Gera uma mensagem de engajamento (ex: Versículo com reflexão, Dica de economia, Bom dia).
+        Gera uma mensagem de engajamento genérica ou personalizada.
         """
         api_key_clean = (api_key or "").strip()
         if not api_key_clean:
@@ -122,7 +233,7 @@ REGRAS:
     @classmethod
     def _chamar_gemini_api(cls, prompt_texto, api_key):
         """
-        Executa a chamada HTTP direta para a API do Google Gemini com suporte a múltiplos modelos.
+        Executa a chamada HTTP direta para a API do Google Gemini com suporte a múltiplos modelos e alta variabilidade.
         """
         headers = {"Content-Type": "application/json"}
         payload = {
@@ -130,7 +241,8 @@ REGRAS:
                 "parts": [{"text": prompt_texto}]
             }],
             "generationConfig": {
-                "temperature": 0.7,
+                "temperature": 0.85,
+                "topP": 0.95,
                 "maxOutputTokens": 1000,
             }
         }

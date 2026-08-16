@@ -73,6 +73,17 @@ def init_db():
     )
     """)
     
+    # Tabela de Histórico de Engajamento / Mensagens Especiais (Anti-duplicação)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS historico_engajamento (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data_envio TEXT,
+        tipo TEXT,
+        resumo TEXT,
+        conteudo TEXT
+    )
+    """)
+    
     conn.commit()
     conn.close()
 
@@ -222,9 +233,38 @@ def obter_produtos_enviados_sucesso(limit=2000):
         print(f"Erro ao obter produtos enviados: {e}")
         return set()
 
+def salvar_historico_engajamento(tipo, resumo, conteudo):
+    """Salva mensagem de engajamento no histórico para evitar repetições"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("""
+            INSERT INTO historico_engajamento (data_envio, tipo, resumo, conteudo)
+            VALUES (?, ?, ?, ?)
+        """, (agora, tipo, resumo, conteudo))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Erro ao salvar historico de engajamento: {e}")
+
+def obter_ultimos_envios_engajamento(tipo, limit=50):
+    """Retorna lista de resumos/temas de mensagens já enviadas para não repetir"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT resumo FROM historico_engajamento
+            WHERE tipo = ?
+            ORDER BY id DESC LIMIT ?
+        """, (tipo, limit))
+        rows = cursor.fetchall()
+        conn.close()
+        return [r[0] for r in rows if r and r[0]]
+    except Exception as e:
+        print(f"Erro ao obter historico de engajamento: {e}")
+        return []
+
 if __name__ == "__main__":
     init_db()
     print(f"Database initialized at: {DB_FILE}")
-
-
-

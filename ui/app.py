@@ -70,6 +70,14 @@ def main_app(page: ft.Page):
         ]
     )
     input_gemini_key = ft.TextField(label="🔑 Google Gemini API Key (Engajamento / Mensagens Especiais)", password=True, can_reveal_password=True)
+    input_custom_msg = ft.TextField(
+        label="✍️ Mensagem Personalizada / Tema (Salvo automaticamente)",
+        multiline=True,
+        min_lines=2,
+        max_lines=3,
+        expand=True,
+        hint_text="Ex: Bom dia pessoal! Fiquem de olho nas super ofertas de hoje no grupo..."
+    )
     input_grupo = ft.TextField(label="Nome do Grupo WhatsApp", value="Teste")
     input_limit = ft.TextField(label="Quantidade de Produtos (por plataforma)", value="5", keyboard_type=ft.KeyboardType.NUMBER)
 
@@ -98,35 +106,83 @@ def main_app(page: ft.Page):
             )
         page.update()
 
-    # Coupons Data Table
+    # Coupons Data Table & Visual Cards
     coupons_table = ft.DataTable(
+        border=ft.border.all(1, "#37474F"),
+        border_radius=8,
+        heading_row_color="#263238",
         columns=[
-            ft.DataColumn(ft.Text("Marketplace")),
-            ft.DataColumn(ft.Text("Cupom / Oferta")),
-            ft.DataColumn(ft.Text("Desconto")),
-            ft.DataColumn(ft.Text("Mínimo")),
-            ft.DataColumn(ft.Text("Categorias")),
-            ft.DataColumn(ft.Text("Validade")),
+            ft.DataColumn(ft.Text("Marketplace", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Cupom / Código", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Desconto", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Mínimo", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Categoria", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Validade", weight=ft.FontWeight.BOLD)),
         ],
         rows=[]
     )
 
+    grid_coupons_cards = ft.GridView(
+        max_extent=320,
+        child_aspect_ratio=2.2,
+        spacing=10,
+        run_spacing=10
+    )
+
     def load_coupons():
         coupons_table.rows.clear()
+        grid_coupons_cards.controls.clear()
         cupons = obter_cupons_validos()
         txt_cupons.value = str(len(cupons))
+        
         for c in cupons:
             min_txt = f"R$ {c['min_value']:.2f}" if c.get('min_value', 0) > 0 else "Sem mín."
-            val_txt = c.get('expires_at') or "Indeterminado"
+            val_txt = c.get('expires_at') or "Hoje / Indeterminado"
+            mkt = c.get('marketplace', 'Geral')
+            code = c.get('code', 'OFERTA')
+            desc = c.get('discount_text') or c.get('title', 'Desconto Especial')
+            cat = c.get('category_tags', 'Geral')
+
+            is_shopee = "Shopee" in mkt
+            card_border_color = "#FF5722" if is_shopee else "#FBC02D"
+            badge_bg = "#D84315" if is_shopee else "#F57F17"
+
+            # 1. Adiciona na DataTable
             coupons_table.rows.append(
                 ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(c.get('marketplace', ''))),
-                    ft.DataCell(ft.Text(c.get('title', '')[:35] + ("..." if len(c.get('title', '')) > 35 else ""))),
-                    ft.DataCell(ft.Text(c.get('discount_text', ''))),
+                    ft.DataCell(ft.Text(mkt, weight=ft.FontWeight.BOLD, color="orange" if is_shopee else "yellow")),
+                    ft.DataCell(ft.Text(code, weight=ft.FontWeight.BOLD, color="amber")),
+                    ft.DataCell(ft.Text(desc[:30])),
                     ft.DataCell(ft.Text(min_txt)),
-                    ft.DataCell(ft.Text(c.get('category_tags', ''))),
+                    ft.DataCell(ft.Text(cat.upper())),
                     ft.DataCell(ft.Text(val_txt)),
                 ])
+            )
+
+            # 2. Adiciona no Grid de Cards Visuais
+            grid_coupons_cards.controls.append(
+                ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Container(
+                                content=ft.Text(mkt, size=11, weight=ft.FontWeight.BOLD, color="white"),
+                                bgcolor=badge_bg,
+                                border_radius=4,
+                                padding=ft.padding.symmetric(horizontal=6, vertical=2)
+                            ),
+                            ft.Text(f"🏷️ {code}", size=14, weight=ft.FontWeight.BOLD, color="amber"),
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                        ft.Text(desc[:45], size=12, weight=ft.FontWeight.BOLD, color="white"),
+                        ft.Row([
+                            ft.Text(f"Mín: {min_txt}", size=11, color="white70"),
+                            ft.Text(f"Val: {val_txt[:10]}", size=11, color="white70"),
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+                    ], spacing=4, alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    padding=10,
+                    border_radius=8,
+                    bgcolor="#1E2A38",
+                    border=ft.border.all(1, card_border_color)
+                )
             )
         page.update()
 
@@ -377,10 +433,12 @@ def main_app(page: ft.Page):
                 "categoria": input_categoria.value,
                 "termo_ml": input_categoria.value,
                 "gemini_key": input_gemini_key.value,
+                "mensagem_custom_padrao": input_custom_msg.value,
                 "grupo": input_grupo.value,
                 "limit": input_limit.value,
                 # Scheduler Config
                 "scheduler_times": scheduled_times,
+                "scheduled_engagement": scheduled_engagement,
             }
             with open(CONFIG_FILE, "w") as f:
                 json.dump(cfg, f)
@@ -398,6 +456,7 @@ def main_app(page: ft.Page):
     input_word_ml.value = current_config.get("word_ml", "")
     input_categoria.value = current_config.get("categoria") or current_config.get("termo_ml", "ofertas")
     input_gemini_key.value = current_config.get("gemini_key", "")
+    input_custom_msg.value = current_config.get("mensagem_custom_padrao", "")
     input_grupo.value = current_config.get("grupo", "Teste")
     input_limit.value = current_config.get("limit", "5")
     
@@ -426,19 +485,31 @@ def main_app(page: ft.Page):
 
     # Coupons Tab Content
     coupons_content = ft.Column([
-        ft.Text("Cupons e Promoções Disponíveis", size=30, weight=ft.FontWeight.BOLD),
+        ft.Text("Cupons e Promoções Disponíveis", size=26, weight=ft.FontWeight.BOLD),
         ft.Row([
             ft.ElevatedButton("Atualizar Cupons (API + ML)", icon="sync", on_click=on_click_sync_cupons),
             ft.ElevatedButton("Recarregar Tabela", icon="refresh", on_click=lambda e: load_coupons()),
         ]),
+        ft.Divider(),
+        ft.Text("🏷️ Cupons Ativos em Destaque:", weight=ft.FontWeight.BOLD, size=16, color="amber"),
         ft.Container(
-            content=ft.Column([coupons_table], scroll=ft.ScrollMode.ALWAYS),
-            expand=True,
-            border=ft.border.all(1, "grey"),
-            border_radius=10,
-            padding=10
+            content=grid_coupons_cards,
+            height=160,
+            border=ft.border.all(1, "#37474F"),
+            border_radius=8,
+            padding=8,
+            bgcolor="#131B24"
+        ),
+        ft.Divider(),
+        ft.Text("📋 Tabela Completa de Cupons:", weight=ft.FontWeight.BOLD, size=16),
+        ft.Container(
+            content=ft.Row([coupons_table], scroll=ft.ScrollMode.ALWAYS),
+            border=ft.border.all(1, "#37474F"),
+            border_radius=8,
+            padding=8,
+            bgcolor="#1A1A1A"
         )
-    ], expand=True, scroll=ft.ScrollMode.ALWAYS, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+    ], expand=True, scroll=ft.ScrollMode.ALWAYS)
 
     # History Tab
     history_content = ft.Column([
@@ -447,11 +518,53 @@ def main_app(page: ft.Page):
         ft.Container(content=history_table, expand=True, border=ft.border.all(1, "grey"), border_radius=10, padding=10)
     ], expand=True, scroll=ft.ScrollMode.ALWAYS, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
 
-    # --- SCHEDULER LOGIC ---
-    def run_scheduler_loop(times_list):
-        add_log(f"Agendador iniciado. Horários: {times_list}")
+    # --- SCHEDULER & ENGAGEMENT LOGIC ---
+    from core.engagement import gerar_mensagem_engajamento_completa
+
+    def disparar_mensagem_engajamento_imediata(tipo, prompt_custom=""):
+        """Dispara uma mensagem de engajamento no WhatsApp imediatamente para teste"""
+        add_log(f"🚀 Preparando mensagem de engajamento ({tipo})...")
+        try:
+            msg = gerar_mensagem_engajamento_completa(
+                tipo=tipo,
+                prompt_custom=prompt_custom,
+                api_key=input_gemini_key.value,
+                log_func=add_log
+            )
+            add_log("Iniciando WhatsApp para envio da mensagem de engajamento...")
+            bot = WhatsAppBot()
+            if not bot.iniciar_driver():
+                add_log("Erro ao iniciar driver do WhatsApp.")
+                return
+            if not bot.aguardar_login():
+                add_log("Timeout no login do WhatsApp.")
+                bot.fechar()
+                return
+            grupo = input_grupo.value or "Teste"
+            if not bot.buscar_grupo(grupo):
+                add_log(f"Grupo '{grupo}' não encontrado.")
+                bot.fechar()
+                return
+            
+            sucesso = bot.enviar_mensagem_texto(msg)
+            bot.fechar()
+            if sucesso:
+                add_log("✅ Mensagem de engajamento enviada com sucesso no grupo!")
+            else:
+                add_log("❌ Falha ao enviar mensagem de texto no grupo.")
+        except Exception as ex:
+            add_log(f"Erro ao disparar engajamento: {ex}")
+
+    def on_click_test_engajamento(e):
+        tipo = select_test_eng_type.value or "versiculo"
+        prompt_c = input_custom_msg.value.strip() if tipo == "custom" else ""
+        threading.Thread(target=disparar_mensagem_engajamento_imediata, args=(tipo, prompt_c), daemon=True).start()
+
+    def run_scheduler_loop(times_list, eng_list):
+        add_log(f"Agendador iniciado. Horários de Ofertas: {times_list} | Engajamento: {len(eng_list)}")
         
         last_run_minute = None
+        last_eng_minute = None
         last_sync_date = None
 
         while hasattr(page, "scheduler_running") and page.scheduler_running:
@@ -460,9 +573,19 @@ def main_app(page: ft.Page):
             current_time = now.strftime("%H:%M")
             today_date = now.strftime("%Y-%m-%d")
             
-            # Verifica se já rodou neste minuto para evitar duplo disparo
+            # 1. Checa Horários de Mensagens Especiais de Engajamento
+            for eng_item in eng_list:
+                if eng_item.get("time") == current_time and current_time != last_eng_minute:
+                    add_log(f"✨ Horário de Mensagem Especial ({current_time} - {eng_item.get('label')}) atingido! Disparando...")
+                    try:
+                        disparar_mensagem_engajamento_imediata(eng_item.get("type", "versiculo"), eng_item.get("custom_text", ""))
+                        last_eng_minute = current_time
+                    except Exception as ex_eng:
+                        add_log(f"Erro ao enviar mensagem agendada: {ex_eng}")
+
+            # 2. Checa Horários de Disparo de Produtos
             if current_time in times_list and current_time != last_run_minute:
-                add_log(f"Horário agendado ({current_time}) atingido! Executando...")
+                add_log(f"📦 Horário agendado de produtos ({current_time}) atingido! Executando...")
                 
                 # Sincronização automática no primeiro horário do dia
                 if last_sync_date != today_date:
@@ -484,7 +607,7 @@ def main_app(page: ft.Page):
                     run_shopee_process()
                     last_run_minute = current_time
                 except Exception as e:
-                    add_log(f"Erro no agendador: {e}")
+                    add_log(f"Erro no agendador de produtos: {e}")
 
             # Aguarda 5s antes de checar novamente
             for _ in range(5):
@@ -499,18 +622,19 @@ def main_app(page: ft.Page):
             add_log("Agendador já está rodando.")
             return
         
-        if not scheduled_times:
-            add_log("Adicione pelo menos um horário.")
+        if not scheduled_times and not scheduled_engagement:
+            add_log("Adicione pelo menos um horário de oferta ou mensagem especial.")
             return
 
         page.scheduler_running = True
-        txt_scheduler_status.value = f"Ativo ({len(scheduled_times)} horários)"
+        total_agendamentos = len(scheduled_times) + len(scheduled_engagement)
+        txt_scheduler_status.value = f"Ativo ({total_agendamentos} agendamentos)"
         txt_scheduler_status.color = "green"
         btn_start_scheduler.disabled = True
         btn_stop_scheduler.disabled = False
         page.update()
 
-        threading.Thread(target=run_scheduler_loop, args=(scheduled_times,), daemon=True).start()
+        threading.Thread(target=run_scheduler_loop, args=(scheduled_times, scheduled_engagement), daemon=True).start()
 
     def on_click_stop_scheduler(e):
         page.scheduler_running = False
@@ -523,6 +647,7 @@ def main_app(page: ft.Page):
 
     # Data storage for times
     scheduled_times = []
+    scheduled_engagement = []
     
     def update_times_list():
         col_times.controls.clear()
@@ -530,23 +655,57 @@ def main_app(page: ft.Page):
             col_times.controls.append(
                 ft.Container(
                     content=ft.Row([
-                        ft.Text(t, size=16, weight=ft.FontWeight.BOLD),
+                        ft.Text(f"📦 {t}", size=15, weight=ft.FontWeight.BOLD),
                         ft.Container(
-                            content=ft.Icon("delete", color="white", size=16),
+                            content=ft.Icon("delete", color="white", size=15),
                             on_click=lambda e, time=t: remove_time(time),
-                            padding=5,
+                            padding=4,
                             ink=True,
                             border_radius=50,
-                            width=30,
-                            height=30,
+                            width=28,
+                            height=28,
                             alignment=ft.alignment.Alignment(0, 0),
                             bgcolor="#D32F2F"
                         )
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                    padding=10,
+                    padding=8,
                     border_radius=8,
                     bgcolor="#2C2C2C",
                     border=ft.border.all(1, "#444444")
+                )
+            )
+        page.update()
+
+    def update_engagement_list():
+        col_eng_times.controls.clear()
+        for item in scheduled_engagement:
+            t_str = item.get("time", "")
+            lbl = item.get("label", "Mensagem Especial")
+            c_txt = (item.get("custom_text") or "").strip()
+            sub_lbl = f'"{c_txt[:28]}..."' if c_txt else lbl
+            col_eng_times.controls.append(
+                ft.Container(
+                    content=ft.Row([
+                        ft.Column([
+                            ft.Text(f"⏰ {t_str} - {lbl}", size=13, weight=ft.FontWeight.BOLD, color="amber"),
+                            ft.Text(sub_lbl, size=11, color="white70"),
+                        ], spacing=2, expand=True),
+                        ft.Container(
+                            content=ft.Icon("delete", color="white", size=15),
+                            on_click=lambda e, it=item: remove_eng_item(it),
+                            padding=4,
+                            ink=True,
+                            border_radius=50,
+                            width=28,
+                            height=28,
+                            alignment=ft.alignment.Alignment(0, 0),
+                            bgcolor="#D32F2F"
+                        )
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    padding=8,
+                    border_radius=8,
+                    bgcolor="#1E2A38",
+                    border=ft.border.all(1, "#2C4058")
                 )
             )
         page.update()
@@ -555,6 +714,12 @@ def main_app(page: ft.Page):
         if t in scheduled_times:
             scheduled_times.remove(t)
             update_times_list()
+            save_config(None)
+
+    def remove_eng_item(it):
+        if it in scheduled_engagement:
+            scheduled_engagement.remove(it)
+            update_engagement_list()
             save_config(None)
 
     def add_time_handler(e):
@@ -570,6 +735,7 @@ def main_app(page: ft.Page):
                      scheduled_times.append(t)
                      scheduled_times.sort()
                      input_time.value = ""
+                     input_time.error_text = None
                      update_times_list()
                      save_config(None)
                  else:
@@ -581,56 +747,116 @@ def main_app(page: ft.Page):
             add_log(f"Erro ao adicionar horário: {ex}")
             page.update()
 
-    input_time = ft.TextField(label="Horário (HH:MM)", width=150)
-    btn_add_time = ft.Container(
-        content=ft.Icon("add_circle", color="green"),
-        on_click=add_time_handler,
-        padding=10,
-        ink=True,
-        border_radius=50,
-        width=40,
-        height=40,
-        alignment=ft.alignment.Alignment(0, 0)
+    def add_eng_handler(e):
+        try:
+            t = input_eng_time.value
+            if not t or len(t) != 5 or t[2] != ":":
+                input_eng_time.error_text = "Formato (HH:MM)"
+                page.update()
+                return
+            
+            tipo = select_eng_type.value or "versiculo"
+            label_map = {
+                "versiculo": "📖 Versículo Bíblico do Dia",
+                "dica": "💡 Dica de Economia",
+                "resumo_cupons": "🏷️ Resumo de Cupons do Dia",
+                "custom": "✍️ Mensagem Personalizada"
+            }
+            texto_custom = input_custom_msg.value.strip() if tipo == "custom" else ""
+            novo_item = {
+                "time": t,
+                "type": tipo,
+                "label": label_map.get(tipo, "Mensagem Especial"),
+                "custom_text": texto_custom
+            }
+            # Evita duplicado no mesmo horário
+            if not any(x.get("time") == t for x in scheduled_engagement):
+                scheduled_engagement.append(novo_item)
+                scheduled_engagement.sort(key=lambda x: x.get("time", ""))
+                input_eng_time.value = ""
+                input_eng_time.error_text = None
+                update_engagement_list()
+                save_config(None)
+            else:
+                input_eng_time.error_text = "Já existe mensagem neste horário"
+            page.update()
+        except Exception as ex:
+            add_log(f"Erro ao adicionar mensagem de engajamento: {ex}")
+            page.update()
+
+    # Controles de Agendamento de Produtos
+    input_time = ft.TextField(label="Horário de Ofertas (HH:MM)", width=180)
+    btn_add_time = ft.ElevatedButton("Adicionar", icon="add", on_click=add_time_handler)
+    col_times = ft.GridView(expand=True, max_extent=160, child_aspect_ratio=3, spacing=8, run_spacing=8)
+
+    # Controles de Agendamento de Mensagens Especiais de Engajamento
+    select_eng_type = ft.Dropdown(
+        label="Tipo de Mensagem Especial",
+        value="versiculo",
+        width=250,
+        options=[
+            ft.dropdown.Option("versiculo", "📖 Versículo Bíblico do Dia"),
+            ft.dropdown.Option("dica", "💡 Dica de Economia / Compras"),
+            ft.dropdown.Option("resumo_cupons", "🏷️ Resumo de Cupons Ativos"),
+            ft.dropdown.Option("custom", "✍️ Mensagem Personalizada"),
+        ]
     )
-    
-    col_times = ft.GridView(
-        expand=True,
-        runs_count=5,
-        max_extent=150,
-        child_aspect_ratio=3,
-        spacing=10,
-        run_spacing=10,
+    input_eng_time = ft.TextField(label="Horário Especial (HH:MM)", width=180)
+    btn_add_eng = ft.ElevatedButton("Agendar Mensagem", icon="add_alert", on_click=add_eng_handler)
+    col_eng_times = ft.GridView(expand=True, max_extent=260, child_aspect_ratio=2.2, spacing=8, run_spacing=8)
+
+    # Botão de Teste Imediato de Mensagem Especial
+    select_test_eng_type = ft.Dropdown(
+        label="Testar Tipo de Mensagem",
+        value="versiculo",
+        width=230,
+        options=[
+            ft.dropdown.Option("versiculo", "📖 Versículo do Dia"),
+            ft.dropdown.Option("dica", "💡 Dica de Economia"),
+            ft.dropdown.Option("resumo_cupons", "🏷️ Resumo de Cupons"),
+            ft.dropdown.Option("custom", "✍️ Mensagem Personalizada"),
+        ]
     )
+    btn_test_eng = ft.ElevatedButton("🚀 Enviar Teste Agora no WhatsApp", icon="send", on_click=on_click_test_engajamento)
 
     txt_scheduler_status = ft.Text("Parado", size=20, weight=ft.FontWeight.BOLD, color="red")
-    btn_start_scheduler = ft.ElevatedButton("Iniciar Agendamento", icon="play_arrow", on_click=on_click_start_scheduler)
-    btn_stop_scheduler = ft.ElevatedButton("Parar Agendamento", icon="stop", on_click=on_click_stop_scheduler, disabled=True)
+    btn_start_scheduler = ft.ElevatedButton("Iniciar Agendamento Geral", icon="play_arrow", on_click=on_click_start_scheduler)
+    btn_stop_scheduler = ft.ElevatedButton("Parar Agendamento Geral", icon="stop", on_click=on_click_stop_scheduler, disabled=True)
 
-    # Scheduler Content
+    # Scheduler Content Completo (UI v1.2)
     scheduler_content = ft.Column([
-        ft.Text("Agendamento Automático", size=30, weight=ft.FontWeight.BOLD),
-        ft.Row([ft.Text("Status:", size=16), txt_scheduler_status]),
+        ft.Text("Agendamento Geral & Mensagens de Engajamento", size=26, weight=ft.FontWeight.BOLD),
+        ft.Row([ft.Text("Status do Robô:", size=16), txt_scheduler_status]),
         ft.Divider(),
-        ft.Text("Adicionar Horários de Execução (Diário):"),
+        
+        # Seção 1: Ofertas de Produtos
+        ft.Text("📦 1. Horários de Disparo de Ofertas (Shopee + ML):", weight=ft.FontWeight.BOLD, size=16, color="green"),
         ft.Row([input_time, btn_add_time]),
-        ft.Text("Lista de Horários:", weight=ft.FontWeight.BOLD),
-        ft.Container(
-            content=col_times,
-            border=ft.border.all(1, "grey"),
-            border_radius=5,
-            padding=5,
-            bgcolor="#1A1A1A",
-            expand=True
-        ),
+        ft.Container(content=col_times, height=90, border=ft.border.all(1, "grey"), border_radius=6, padding=6, bgcolor="#1A1A1A"),
+        
+        ft.Divider(),
+        
+        # Seção 2: Mensagens Especiais de Engajamento
+        ft.Text("✨ 2. Mensagens Especiais Diárias (Versículos / Dicas / Cupons):", weight=ft.FontWeight.BOLD, size=16, color="amber"),
+        input_custom_msg,
+        ft.Row([select_eng_type, input_eng_time, btn_add_eng]),
+        ft.Container(content=col_eng_times, height=110, border=ft.border.all(1, "grey"), border_radius=6, padding=6, bgcolor="#131B24"),
+        
+        ft.Divider(),
+        
+        # Seção 3: Teste Imediato de Engajamento
+        ft.Text("🧪 Teste Rápido de Conteúdo:", weight=ft.FontWeight.BOLD, color="purple"),
+        ft.Row([select_test_eng_type, btn_test_eng]),
+        
         ft.Divider(),
         ft.Row([
             ft.Container(content=btn_start_scheduler, expand=True),
             ft.Container(content=btn_stop_scheduler, expand=True)
         ]),
         ft.Row([
-            ft.Text("Nota: O computador deve permanecer ligado.", italic=True)
+            ft.Text("Nota: O computador deve permanecer ligado e conectado à internet.", italic=True, size=12)
         ], alignment=ft.MainAxisAlignment.CENTER)
-    ], expand=True)
+    ], expand=True, scroll=ft.ScrollMode.ALWAYS)
     
     # Visibilidade inicial das abas
     dashboard_content.visible = True
@@ -734,7 +960,9 @@ def main_app(page: ft.Page):
     # Load Scheduler Config
     try:
         scheduled_times.extend(current_config.get("scheduler_times", []))
+        scheduled_engagement.extend(current_config.get("scheduled_engagement", []))
         update_times_list()
+        update_engagement_list()
     except Exception as e:
         print(f"Erro ao carregar config do agendador: {e}")
 
